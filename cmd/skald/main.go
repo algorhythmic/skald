@@ -18,6 +18,9 @@ import (
 
 const usage = `skald — conversation context across projects and environments
 
+Start here:
+  skald [tui flags]        start the archive daemon if needed and open the TUI
+
 Source connection:
   skald sources --provider claude_code|codex [--root DIRECTORY] [--since RFC3339|all] [--limit 10]
   skald connect --provider claude_code|codex [--root DIRECTORY] [--config FILE]
@@ -54,11 +57,17 @@ func main() {
 }
 
 func run(args []string, out, stderr io.Writer) error {
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
+	if len(args) == 0 {
+		return runTUI(nil, stderr, true)
+	}
+	if args[0] == "help" || args[0] == "--help" || args[0] == "-h" {
 		_, err := io.WriteString(out, usage)
 		return err
 	}
-	if args[0] == "version" {
+	if strings.HasPrefix(args[0], "-") {
+		return runTUI(args, stderr, true)
+	}
+	if args[0] == "version" || args[0] == "--version" {
 		if len(args) != 1 {
 			return errors.New("unexpected_arguments")
 		}
@@ -69,7 +78,7 @@ func run(args []string, out, stderr io.Writer) error {
 		return runConnect(args, out, stderr)
 	}
 	if args[0] == "tui" {
-		return runTUI(args[1:], stderr)
+		return runTUI(args[1:], stderr, false)
 	}
 	if isArchiveCommand(args[0]) {
 		return runArchive(args, out, stderr)

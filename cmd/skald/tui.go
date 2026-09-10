@@ -4,18 +4,21 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/algorhythmic/skald/internal/client"
 	"github.com/algorhythmic/skald/internal/daemon"
 	"github.com/algorhythmic/skald/internal/tui"
 )
 
-func runTUI(args []string, stderr io.Writer) error {
+func runTUI(args []string, stderr io.Writer, ensure bool) error {
 	f := flag.NewFlagSet("tui", flag.ContinueOnError)
 	f.SetOutput(stderr)
 	defaultTheme := os.Getenv("SKALD_THEME")
@@ -50,7 +53,59 @@ func runTUI(args []string, stderr io.Writer) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if ensure {
+		ensureDaemon(ctx, *socket, stderr)
+	}
 	c := client.New(*socket)
 	defer c.Close()
 	return tui.Run(ctx, tui.Remote{Client: c, Namespace: *ns}, theme)
+}
+
+// ensureDaemon spawns a detached archive daemon when no peer answers the
+// socket. The daemon is independent: it keeps running after the TUI exits.
+func ensureDaemon(ctx context.Context, socket string, stderr io.Writer) {
+	probe, stop := context.WithTimeout(ctx, 2*time.Second)
+	c := client.New(socket)
+	var status any
+	err := c.Do(probe, "GET", "/v1/status", nil, &status)
+	stop()
+	c.Close()
+	if err == nil || err.Error() != "daemon_unavailable" {
+		return
+	}
+	cfg, cfgErr := daemon.DefaultConfigPath()
+	if cfgErr != nil {
+		return
+	}
+	if info, statErr := os.Stat(cfg); statErr != nil || info.IsDir() {
+		fmt.Fprintln(stderr, "skald: daemon not running; connect a source first with `skald connect`")
+		return
+	}
+	log, err := os.OpenFile(filepath.Join(filepath.Dir(socket), "daemon.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		log = nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		exe = os.Args[0]
+	}
+	cmd := exec.Command(exe, "serve", "--config", cfg, "--socket", socket)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if log != nil {
+		cmd.Stderr = log
+	}
+	if err := cmd.Start(); err != nil {
+		if log != nil {
+			log.Close()
+		}
+		fmt.Fprintf(stderr, "skald: daemon start failed: %v\n", err)
+		return
+	}
+	go func() {
+		_ = cmd.Wait()
+		if log != nil {
+			log.Close()
+		}
+	}()
+	fmt.Fprintln(stderr, "skald: daemon started in background; connecting")
 }

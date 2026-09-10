@@ -52,6 +52,9 @@ In another terminal:
 ./bin/skald sessions
 ```
 
+Once a configuration is saved, plain `./bin/skald` starts the daemon when the
+socket has no live peer and then opens the TUI.
+
 For a temporary synthetic demonstration, run `make demo` in a terminal.
 Skald uses your terminal’s theme colors by default; press `t` to switch to the
 original amber palette, or start with `skald tui --theme amber`.

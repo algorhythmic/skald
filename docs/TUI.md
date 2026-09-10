@@ -9,6 +9,13 @@ then run:
 ./bin/skald tui --theme amber
 ```
 
+Running `./bin/skald` with no command opens the same TUI and first starts a
+detached daemon when no peer answers the socket; it requires a saved
+configuration and passes through `tui` flags such as `--theme`. A `tui`-started
+daemon keeps running after the UI exits, like any `serve` daemon. Its stderr is
+appended to `daemon.log` beside the socket. An explicit `skald tui` never
+starts a daemon itself.
+
 For a disposable demonstration with three synthetic conversations, run `make demo`.
 The demo creates a private temporary archive, starts its daemon and opens the TUI
 in the current terminal. Quitting removes the demo archive and stops that demo's
