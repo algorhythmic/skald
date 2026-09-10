@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 type Cursor struct {

@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/archive"
 )
 
 type API struct {

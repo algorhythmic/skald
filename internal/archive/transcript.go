@@ -5,7 +5,7 @@ import (
 	"errors"
 	"unicode/utf8"
 
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 // TranscriptEntry is a display projection, never an exact record envelope. Exact

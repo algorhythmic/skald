@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/algorhythmic/skald/internal/archive"
 	"github.com/gdamore/tcell/v2"
-	"skald/internal/archive"
 )
 
 type row struct {

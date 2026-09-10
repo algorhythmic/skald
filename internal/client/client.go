@@ -11,7 +11,7 @@ import (
 	"net/url"
 	"time"
 
-	"skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/archive"
 )
 
 type Client struct {

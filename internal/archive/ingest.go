@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"skald/sessioncapture"
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessioncapture"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 type Registration struct {

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"skald/sessioncapture"
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessioncapture"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 var testNow = time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)

@@ -12,8 +12,8 @@ import (
 	"unicode"
 	"unicode/utf16"
 
-	"skald/sessioncapture"
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessioncapture"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 const usage = `skald — conversation context across projects and environments

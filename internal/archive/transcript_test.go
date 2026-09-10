@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"skald/sessioncapture"
+	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 func TestTranscriptPagesScopeClippingAndProjects(t *testing.T) {

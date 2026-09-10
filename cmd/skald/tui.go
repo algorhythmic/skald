@@ -10,9 +10,9 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"skald/internal/client"
-	"skald/internal/daemon"
-	"skald/internal/tui"
+	"github.com/algorhythmic/skald/internal/client"
+	"github.com/algorhythmic/skald/internal/daemon"
+	"github.com/algorhythmic/skald/internal/tui"
 )
 
 func runTUI(args []string, stderr io.Writer) error {

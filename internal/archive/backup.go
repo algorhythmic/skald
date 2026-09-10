@@ -7,8 +7,8 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/algorhythmic/skald/sessionrecord"
 	"modernc.org/sqlite"
-	"skald/sessionrecord"
 )
 
 type backuper interface {

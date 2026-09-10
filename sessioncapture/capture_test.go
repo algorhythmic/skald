@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
-	"skald/sessioncapture"
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessioncapture"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 var clock = time.Date(2026, 9, 10, 12, 0, 0, 0, time.UTC)

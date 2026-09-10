@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"github.com/algorhythmic/skald/sessioncapture"
 	"io"
 	"os"
 	"path/filepath"
-	"skald/sessioncapture"
 	"sort"
 	"time"
 
-	"skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/archive"
 )
 
 type DiscoveryRoot struct {

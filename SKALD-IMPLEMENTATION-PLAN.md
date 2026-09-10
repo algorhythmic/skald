@@ -11,10 +11,11 @@ amendment explains how Heimdall would consume it without depending on Skald.
 
 ## 0. Naming and review decisions (2026-09-10)
 
-The product, executable and local module are **Skald**, `skald` and `skald`.
+The product and executable are **Skald** and `skald`; the Go module path is
+`github.com/algorhythmic/skald`, matching the published repository so that
+Heimdall can depend on it by tagged version.
 The public package names remain `sessionrecord` and `sessioncapture`: they name
-the shared domain, not the product. A release module path will be selected when a
-repository remote exists; no unpublished remote is invented. Configuration uses
+the shared domain, not the product. Configuration uses
 `$XDG_CONFIG_HOME/skald`, durable state `$XDG_DATA_HOME/skald`, runtime socket
 `$XDG_RUNTIME_DIR/skald/skald.sock`, and disposable indexes `$XDG_CACHE_HOME/skald`.
 No legacy installation or database exists here, so there is no rename migration.

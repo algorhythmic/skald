@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"skald/internal/daemon"
+	"github.com/algorhythmic/skald/internal/daemon"
 )
 
 func TestConnectPreviewPersistsScopeAndDoesNotCollect(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"strconv"
 
-	"skald/internal/archive"
-	"skald/internal/client"
+	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/client"
 )
 
 type RootStatus struct {

@@ -12,9 +12,9 @@ import (
 	"strconv"
 	"syscall"
 
-	"skald/internal/archive"
-	"skald/internal/client"
-	"skald/internal/daemon"
+	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/client"
+	"github.com/algorhythmic/skald/internal/daemon"
 )
 
 func isArchiveCommand(cmd string) bool {

@@ -1,4 +1,4 @@
-module skald
+module github.com/algorhythmic/skald
 
 go 1.25.0
 

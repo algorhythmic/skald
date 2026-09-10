@@ -103,10 +103,11 @@ Large native transcripts still incur repeated full-prefix hashing per batch.
 
 ## Remaining work
 
-1. Finish capture release gates: native subagent/fork/alias fixtures, broader
-   installed-provider capability verification, and a
-   public module path when a remote exists. Root aliases and stream tokens now
-   persist, but provider conversation aliases remain a separate capability.
+1. Finish capture release gates: native subagent/fork/alias fixtures and broader
+   installed-provider capability verification. The module path is now
+   `github.com/algorhythmic/skald`, tagged `v0.1.0` for consumers. Root aliases
+   and stream tokens persist, but provider conversation aliases remain a separate
+   capability.
 2. Measure and improve large-transcript backfill/tailing and storage growth. Test
    extended disk-pressure and migration/recovery scenarios. Keep current explicit
    capacity and coverage diagnostics; do not claim full L1 release acceptance yet.
@@ -122,5 +123,4 @@ Codex 0.153.4 native files, including desktop-origin Codex data. No personal
 conversation bodies were persisted in test fixtures or archived during verification.
 Only this project's files, build caches, prepared connection config and temporary
 synthetic test data were written. No provider hooks, user services, desktop
-settings or model requests were introduced. No repository
-remote or release was created.
+settings or model requests were introduced.

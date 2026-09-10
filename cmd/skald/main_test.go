@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"skald/sessioncapture"
+	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 func TestInspectAndResumeCLI(t *testing.T) {

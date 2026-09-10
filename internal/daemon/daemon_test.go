@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"skald/internal/archive"
-	"skald/sessioncapture"
+	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 func testCollector(t *testing.T) (*Collector, string) {

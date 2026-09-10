@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"time"
 
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 const AdapterVersion = "jsonl-v1.0.0"

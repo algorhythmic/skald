@@ -1,9 +1,13 @@
 # Session record v1
 
-The local module is `skald`. Its public packages are `skald/sessionrecord` and
-`skald/sessioncapture`. The public packages import no Heimdall code, database, task state, hooks,
-model clients or desktop services. This foundation is pre-release; a publishable
-module path and provider compatibility freeze remain release work.
+The module is `github.com/algorhythmic/skald`, published from that repository.
+Its public packages are `github.com/algorhythmic/skald/sessionrecord` and
+`github.com/algorhythmic/skald/sessioncapture`. The public packages import no
+Heimdall code, database, task state, hooks, model clients or desktop services.
+Consumers pin a tagged release (`v0.1.0` onward) rather than a commit
+pseudo-version. The record and identity encoding below is the released v1
+contract; the provider compatibility freeze for native file formats remains
+release work and is tracked in [STATUS.md](../STATUS.md).
 
 ## Identity encoding
 

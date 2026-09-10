@@ -8,9 +8,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/algorhythmic/skald/internal/archive"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/uniseg"
-	"skald/internal/archive"
 )
 
 func TestUnicodeControlsAndNarrowScreens(t *testing.T) {

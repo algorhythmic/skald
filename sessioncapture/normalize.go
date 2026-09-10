@@ -7,7 +7,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 type object map[string]json.RawMessage

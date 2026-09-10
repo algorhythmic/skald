@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 func TestCanonicalVectors(t *testing.T) {

@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"skald/internal/archive"
-	"skald/sessioncapture"
+	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 type Collector struct {

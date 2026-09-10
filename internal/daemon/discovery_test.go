@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"skald/internal/archive"
-	"skald/sessioncapture"
+	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 func discoveryCollector(t *testing.T, max int) *Collector {

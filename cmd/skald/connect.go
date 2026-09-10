@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"skald/internal/daemon"
-	"skald/sessioncapture"
-	"skald/sessionrecord"
+	"github.com/algorhythmic/skald/internal/daemon"
+	"github.com/algorhythmic/skald/sessioncapture"
+	"github.com/algorhythmic/skald/sessionrecord"
 )
 
 type sourcePreview struct {
