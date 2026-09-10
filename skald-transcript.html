@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skald · transcript</title>
+<style>
+  :root{
+    --frame:#262622; --term:#1b1b18; --line:#4a4a43; --line-soft:#33332e;
+    --ink:#a7a79a; --dim:#6a6a62; --bright:#ecece3;
+    --amber:#e3a23a; --green:#8fc96b; --red:#e5795a; --yellow:#e7c25a;
+    --sel:#232320; --key:#2a2a25;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--frame);color:var(--ink);
+       font:12.5px/1.6 ui-monospace,"JetBrains Mono","Cascadia Mono","Fira Mono",Menlo,monospace;}
+  .wrap{padding:22px}
+  .design-note{margin-bottom:12px;color:#a7a79a}
+  .term{max-width:100%}
+  @media(max-width:800px){.wrap{padding:12px}.hdr{flex-wrap:wrap;gap:8px!important;white-space:normal!important}.ln{flex-wrap:wrap;gap:0!important;white-space:pre-wrap!important}.ln .meta{padding-left:24px}.box>.m{position:static!important;display:block;margin-bottom:10px}.keys{white-space:normal!important}.turn{grid-template-columns:52px 48px minmax(0,1fr)!important}.recap{padding-left:6px!important}}
+  .term{width:1280px;background:var(--term);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .tabbar{display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--line-soft);color:#8f8f85}
+  .body{padding:14px 16px 12px}
+
+  .hdr{display:flex;flex-wrap:wrap;gap:8px 22px;white-space:normal;padding:0 4px}
+  .hdr .name{color:var(--amber);font-weight:600}
+
+  .box{position:relative;border:1px solid var(--line);border-radius:4px;padding:14px 8px 8px;margin-top:16px}
+  .box>.t{position:absolute;top:-10px;left:10px;background:var(--term);padding:0 6px;color:var(--amber);font-weight:600}
+  .box>.m{position:absolute;top:-10px;right:10px;background:var(--term);padding:0 6px;color:#7d7d74}
+
+  .turn{display:grid;grid-template-columns:70px 56px minmax(0,800px);padding:0 6px;margin-top:9px}
+  .turn>span:first-child{color:var(--dim)} .turn>span:nth-child(2){color:var(--dim)}
+  .turn.you>span:first-child{color:var(--bright)} .turn.you .txt{color:var(--bright)}
+  .turn.tool{margin-top:2px} .turn.tool .txt,.turn.tool>span{color:var(--dim)}
+  .turn.cont{margin-top:0}
+  .txt p{margin:0 0 7px} .txt p:last-child{margin:0}
+  .txt ol{margin:0 0 7px;padding-left:22px} .txt li{margin:0 0 4px}
+  .txt code{color:var(--ink)}
+
+  .mark{display:flex;align-items:center;gap:8px;white-space:nowrap;margin:14px 6px 4px;color:var(--amber)}
+  .mark .rule{flex:1;border-top:1px solid var(--line-soft)}
+  .mark .meta{color:var(--dim)}
+  .mark.d{color:var(--dim)}
+  .recap{padding:0 6px 0 132px;max-width:930px;color:var(--ink)}
+
+  .g{color:var(--green)} .r{color:var(--red)} .y{color:var(--yellow)} .a{color:var(--amber)}
+  .d{color:var(--dim)} .w{color:var(--bright)}
+  .keys{margin-top:14px;padding:4px 6px 0;white-space:nowrap}
+  .keys b{color:var(--amber);font-weight:600;margin-left:14px;margin-right:4px}
+  .keys b:first-child{margin-left:0}
+  .keys .off,.keys .off b{color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="design-note">Skald · synthetic TUI design study · keyboard hints describe planned controls</div>
+<div class="term">
+  <div class="tabbar"><span>skald</span><span><span class="d">1 sessions</span>   <span class="w">2 transcript</span></span></div>
+  <div class="body">
+
+    <div class="hdr">
+      <span class="name">skald</span>
+      <span>daemon <span class="g">ok</span></span>
+      <span>captured <span class="w">14s ago</span> <span class="g">▲</span></span>
+      <span>claude-code <span class="g">ok</span> · codex <span class="g">ok</span> · exports</span>
+      <span>61 sessions · <span class="g">2 live</span> · <span class="y">1 input request · native signal</span></span>
+      <span>search ready</span>
+    </div>
+
+    <div class="box">
+      <span class="t">dotprivate › Can dotprivate sync stand in for a selected-files commit?</span>
+      <span class="m">claude-code · native end 3h ago · 41 records · 1 recap · showing all</span>
+
+      <div class="mark d"><span>Wed 9 Sep · 09:41 · started in ~/dev/dotprivate</span><span class="rule"></span></div>
+
+      <div class="turn you"><span>you</span><span>09:41</span><span class="txt"><p>Can dotprivate's sync path stand in for the selected-files commit Skald needs? I'd rather not write a second git wrapper if the existing one is close enough.</p></span></div>
+
+      <div class="turn"><span>claude</span><span>09:41</span><span class="txt"><p>Let me read what ingest and sync actually do before answering.</p></span></div>
+      <div class="turn tool"><span>tool</span><span>09:41</span><span class="txt">▸ 4 calls · Read dotprivate ×2 · Grep "git add" · Bash git log -1 · 6s</span></div>
+
+      <div class="turn"><span>claude</span><span>09:42</span><span class="txt">
+        <p>Close, but not close enough, and the gap is exactly the one that matters for unattended use. At 51d0fce there are two paths:</p>
+        <p><code>cmd_ingest</code> copies the selected files into <code>_external/&lt;absolute-path&gt;/</code> inside the checkout, then commits and pushes. The copy is scoped to what you passed in, but the commit that follows is not — it runs <code>git add -A</code> in the private checkout, so anything else sitting dirty in there goes into the same commit.</p>
+        <p><code>cmd_sync</code> doesn't take a selection at all: it stages the whole checkout and commits. It's a "publish everything" command by design.</p>
+        <p>Neither path serializes on the checkout, so two ingests racing would interleave their staging. And the discovery filters exclude <code>.codex</code> and <code>.claude</code> outright — fine for Skald, which wants dotprivate as a destination rather than a source, but it means dotprivate can't be pointed at transcripts as-is either way.</p>
+      </span></div>
+
+      <div class="turn you"><span>you</span><span>09:44</span><span class="txt"><p>So what would need to change for it to satisfy the manifest contract?</p></span></div>
+
+      <div class="turn"><span>claude</span><span>09:45</span><span class="txt">
+        <p>Two functions, and nothing about the on-disk layout:</p>
+        <ol>
+          <li><code>cmd_ingest</code>: replace <code>git add -A</code> with <code>git add -- &lt;each manifest path&gt;</code>, and refuse to commit if <code>git status --porcelain</code> shows staged changes outside the manifest. That alone gives you "unrelated dirty files stay uncommitted".</li>
+          <li>A lock around the copy → stage → commit → push sequence — <code>flock</code> on a file in the checkout is enough for one machine — plus a receipt written after the push returns rather than before, so a failed push leaves a visible backlog instead of a claimed publication.</li>
+        </ol>
+        <p><code>cmd_sync</code> can stay as it is; it just isn't the thing Skald calls.</p>
+      </span></div>
+
+      <div class="turn you"><span>you</span><span>09:46</span><span class="txt"><p>ok leave it as is for now, note it in the plan</p></span></div>
+
+      <div class="turn"><span>claude</span><span>09:46</span><span class="txt"><p>Noted. I added a paragraph to §6.5 saying the current <code>git add -A</code> path doesn't satisfy the selected-files contract and isn't the basis for unattended publication, with the two changes above as the eventual scope.</p></span></div>
+      <div class="turn tool"><span>tool</span><span>09:46</span><span class="txt">▸ 1 call · Edit docs/design/SKALD-IMPLEMENTATION-PLAN.md · 2s</span></div>
+
+      <div class="mark"><span>recap · written 09:49</span><span class="rule"></span><span class="meta">native away_summary · coverage unknown · placed by source order</span></div>
+      <div class="recap">You asked whether dotprivate's sync path could serve as Skald's selected-files handoff. Reading it at 51d0fce: ingest copies the selected files and then commits and pushes, and sync stages everything in the private checkout, so any unrelated dirty file would go into the same commit. The answer is no without a manifest-scoped commit; I listed the two functions that would need to change and left the current behaviour as is.</div>
+
+      <div class="mark d"><span>native session-end 09:52 · no newer records · surface unavailable</span><span class="rule"></span></div>
+    </div>
+
+    <div class="keys">
+      <b>j k</b>scroll <b>n p</b>recap <b>[ ]</b>turn <b>space</b>unfold tools <b>/</b>find <b>y</b>copy record <span class="off"><b>o</b>jump to pane</span> <b>esc</b>back
+    </div>
+
+  </div>
+</div>
+</div>
+</body>
+</html>

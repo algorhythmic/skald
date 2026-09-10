@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skald · window</title>
+<style>
+  :root{
+    --frame:#262622; --term:#1b1b18; --line:#4a4a43; --line-soft:#33332e; --tree:#5c5c54;
+    --ink:#a7a79a; --dim:#6a6a62; --bright:#ecece3;
+    --amber:#e3a23a; --green:#8fc96b; --red:#e5795a; --yellow:#e7c25a;
+    --sel:#232320; --key:#2a2a25;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--frame);color:var(--ink);
+       font:12.5px/1.6 ui-monospace,"JetBrains Mono","Cascadia Mono","Fira Mono",Menlo,monospace;}
+  .wrap{padding:22px}
+  .design-note{margin-bottom:12px;color:#a7a79a}
+  .term{max-width:100%}
+  @media(max-width:800px){.wrap{padding:12px}.hdr{flex-wrap:wrap;gap:8px!important;white-space:normal!important}.ln{flex-wrap:wrap;gap:0!important;white-space:pre-wrap!important}.ln .meta{padding-left:24px}.box>.m{position:static!important;display:block;margin-bottom:10px}.keys{white-space:normal!important}.turn{grid-template-columns:52px 48px minmax(0,1fr)!important}.recap{padding-left:6px!important}}
+  .term{width:1280px;background:var(--term);border:1px solid var(--line);border-radius:6px;overflow:hidden}
+  .tabbar{display:flex;justify-content:space-between;padding:6px 14px;border-bottom:1px solid var(--line-soft);color:#8f8f85}
+  .body{padding:14px 16px 12px}
+
+  .hdr{display:flex;flex-wrap:wrap;gap:8px 22px;white-space:normal;padding:0 4px}
+  .hdr .name{color:var(--amber);font-weight:600}
+
+  .box{position:relative;border:1px solid var(--line);border-radius:4px;padding:14px 8px 8px;margin-top:16px}
+  .box>.t{position:absolute;top:-10px;left:10px;background:var(--term);padding:0 6px;color:var(--amber);font-weight:600}
+  .box>.m{position:absolute;top:-10px;right:10px;background:var(--term);padding:0 6px;color:#7d7d74}
+
+  .ln{display:flex;justify-content:space-between;gap:16px;white-space:pre;padding:0 6px}
+  .ln>span:first-child{overflow:hidden;text-overflow:ellipsis}
+  .ln .meta{color:var(--dim)}
+  .grp{margin-top:9px}
+  .grp:first-child{margin-top:0}
+  .sel{background:var(--sel);border-radius:2px}
+
+  .t{color:var(--tree)}          /* tree connectors */
+  .g{color:var(--green)} .r{color:var(--red)} .y{color:var(--yellow)} .a{color:var(--amber)}
+  .d{color:var(--dim)} .w{color:var(--bright)}
+  .k{padding:0 5px;border-radius:2px;background:var(--key);color:var(--ink)}
+  .k b{color:var(--amber);font-weight:600;margin-right:4px}
+  .keys{margin-top:14px;padding:4px 6px 0;white-space:nowrap}
+  .keys b{color:var(--amber);font-weight:600;margin-left:14px;margin-right:4px}
+  .keys b:first-child{margin-left:0}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="design-note">Skald · synthetic TUI design study · keyboard hints describe planned controls</div>
+<div class="term">
+  <div class="tabbar"><span>skald</span><span><span class="w">1 sessions</span>   <span class="d">2 transcript</span></span></div>
+  <div class="body">
+
+    <div class="hdr">
+      <span class="name">skald</span>
+      <span>daemon <span class="g">ok</span></span>
+      <span>captured <span class="w">14s ago</span> <span class="g">▲</span></span>
+      <span>claude-code <span class="g">ok</span> · codex <span class="g">ok</span> · exports</span>
+      <span>61 sessions · <span class="g">2 live</span> · <span class="y">1 input request · native signal</span></span>
+      <span>search ready</span>
+    </div>
+
+    <div class="box">
+      <span class="t" style="color:var(--amber)">sessions</span>
+      <span class="m">by <span class="w">project</span> · <span class="a">g</span> herdr space · <span class="a">G</span> group · <span class="a">/</span> filter · <span class="a">s</span> search</span>
+
+<!-- ══════════ heimdall ══════════ -->
+<div class="ln grp"><span><span class="a">▾ heimdall</span></span><span class="meta">~/dev/heimdall · 14 sessions · native working signal</span></div>
+<div class="ln"><span><span class="t">│</span></span></div>
+<div class="sel">
+<div class="ln"><span><span class="t">├─</span> <span class="g">●</span> <span class="w">Migrate S2a to schema 21 without breaking the P0 baseline</span></span><span class="meta">claude-code · <span class="g">working signal</span> · 2m ago · heimdall:w1:p1</span></div>
+<div class="ln"><span><span class="t">│  │</span></span></div>
+<div class="ln"><span><span class="t">│  ├─</span> <span class="w">current excerpt</span> <span class="d">· assistant · 2m ago · original record available</span></span></div>
+<div class="ln"><span><span class="t">│  │</span>  Both cases pass. The pre-migration check reports the two rows by surface id and refuses to</span></div>
+<div class="ln"><span><span class="t">│  │</span>  run unless --allow-null-epoch is set. Do you want it in heimdall doctor too?</span></div>
+<div class="ln"><span><span class="t">│  │</span></span></div>
+<div class="ln"><span><span class="t">│  ├─</span> <span class="d">prior recap · 9m ago · coverage unknown · newer activity</span></span></div>
+<div class="ln"><span><span class="t">│  │</span>  You asked me to finish the S2a migration to schema 21 while keeping the schema-20 P0 baseline</span></div>
+<div class="ln"><span><span class="t">│  │</span>  verifiable on its own. I split the artifact_versions backfill into a separate migration step so</span></div>
+<div class="ln"><span><span class="t">│  │</span>  schema 20 can still be checked before it runs, then hit a foreign-key failure on</span></div>
+<div class="ln"><span><span class="t">│  │</span>  session_surface_links rows whose epoch is null. I'm replacing the hard failure with a</span></div>
+<div class="ln"><span><span class="t">│  │</span>  pre-migration check that lists those rows and stops before anything is written.</span></div>
+<div class="ln"><span><span class="t">│  │</span></span></div>
+<div class="ln"><span><span class="t">│  ├─</span> <span class="y">since then</span> <span class="d">· 4 turns · 6 tool calls</span></span></div>
+<div class="ln"><span><span class="t">│  │</span>  <span class="d">you:</span> "don't touch the P0 fixtures — add a new fixture for the null-epoch case"</span></div>
+<div class="ln"><span><span class="t">│  │</span></span></div>
+<div class="ln"><span><span class="t">│  └─</span> <span class="d">recent · last 4 of 214 records</span></span></div>
+<div class="ln"><span><span class="t">│</span>     <span class="w">you</span>     <span class="d">4m</span>  don't touch the P0 fixtures — add a new fixture for the null-epoch case</span></div>
+<div class="ln"><span><span class="t">│</span>     <span class="d">claude</span>  <span class="d">4m</span>  Right, testdata/p0/* stays as it is. I'll add testdata/s2a/null-epoch-links.yaml with two</span></div>
+<div class="ln"><span><span class="t">│</span>                  session_surface_links rows whose epoch is null: one whose surface still exists and one</span></div>
+<div class="ln"><span><span class="t">│</span>                  that's orphaned, so the check has to tell "repairable" from "must stop".</span></div>
+<div class="ln"><span><span class="t">│</span>     <span class="d">tool    3m  go test ./internal/store/... · ok · 12.4s</span></span></div>
+<div class="ln"><span><span class="t">│</span>     <span class="d">claude</span>  <span class="d">2m</span>  Both cases pass. The pre-migration check now reports the two rows by surface id and</span></div>
+<div class="ln"><span><span class="t">│</span>                  refuses to run unless --allow-null-epoch is set. Do you want it in `heimdall doctor` too?</span></div>
+<div class="ln"><span><span class="t">│</span></span></div>
+<div class="ln"><span><span class="t">│</span>     <span class="k"><b>⏎</b>read transcript</span>  <span class="k"><b>h</b>3 recaps</span>  <span class="k"><b>o</b>jump to pane</span></span></div>
+</div>
+<div class="ln"><span><span class="t">│</span></span></div>
+<div class="ln"><span><span class="t">├─</span> <span class="d">○</span> Ratify a proposal from the TUI without a second daemon round trip</span><span class="meta">claude-code · inactive 5h · end unknown</span></div>
+<div class="ln"><span><span class="t">├─</span> <span class="d">○</span> Herdr binding refresh drops the epoch after a reconnect</span><span class="meta">codex · inactive since yesterday · end unknown</span></div>
+<div class="ln"><span><span class="t">└─</span> <span class="d">… 11 older · space</span></span></div>
+
+<!-- ══════════ braid ══════════ -->
+<div class="ln grp"><span><span class="a">▾ braid</span></span><span class="meta">~/dev/braid · 9 sessions · <span class="y">1 input request · native signal</span></span></div>
+<div class="ln"><span><span class="t">│</span></span></div>
+<div class="ln"><span><span class="t">├─</span> <span class="y">◐</span> <span class="w">export_context byte limit vs the citation wrapper</span></span><span class="meta">codex · <span class="y">input requested</span> · 40s · braid:w1:p2</span></div>
+<div class="ln"><span><span class="t">│  │</span></span></div>
+<div class="ln"><span><span class="t">│  └─</span> <span class="d">last reply · 40s · excerpt · Codex 0.153.4 recap not persisted</span></span></div>
+<div class="ln"><span><span class="t">│</span>     The limit in export_context is applied to the context array only, so the citation wrapper and the</span></div>
+<div class="ln"><span><span class="t">│</span>     request echo can push a response that reports "within budget" about six percent over the caller's</span></div>
+<div class="ln"><span><span class="t">│</span>     real limit. Two ways to fix it: reserve a fixed overhead inside the engine, or report the wrapper</span></div>
+<div class="ln"><span><span class="t">│</span>     size as a separate field and leave the reservation to the caller. The second keeps the byte</span></div>
+<div class="ln"><span><span class="t">│</span>     semantics exact; the first is simpler for WCU and Skald to consume. Which do you want?</span></div>
+<div class="ln"><span><span class="t">│</span></span></div>
+<div class="ln"><span><span class="t">├─</span> <span class="d">○</span> replace_snapshot leaves a stale generation behind</span><span class="meta">codex · inactive 4h · end unknown</span></div>
+<div class="ln"><span><span class="t">└─</span> <span class="d">… 7 older · space</span></span></div>
+
+<!-- ══════════ homelab ══════════ -->
+<div class="ln grp"><span><span class="a">▾ homelab</span></span><span class="meta">~/dev/homelab · 6 sessions · native working signal</span></div>
+<div class="ln"><span><span class="t">│</span></span></div>
+<div class="ln"><span><span class="t">├─</span> <span class="g">●</span> <span class="w">Tailscale subnet route from the M75s keeps dropping</span></span><span class="meta">claude-code · <span class="g">working signal</span> · 6m ago · homelab:w2:p1</span></div>
+<div class="ln"><span><span class="t">│  │</span></span></div>
+<div class="ln"><span><span class="t">│  ├─</span> <span class="d">recap · 15m ago · coverage unknown</span></span></div>
+<div class="ln"><span><span class="t">│  │</span>  You reported the 192.168.86.0/24 route advertised from the Proxmox host disappearing every few</span></div>
+<div class="ln"><span><span class="t">│  │</span>  hours. From the journal, tailscaled restarts each time the Pi-hole container rewrites resolv.conf,</span></div>
+<div class="ln"><span><span class="t">│  │</span>  and the route isn't re-advertised afterwards because --advertise-routes was only ever passed on the</span></div>
+<div class="ln"><span><span class="t">│  │</span>  command line, never persisted. I've moved it into `tailscale set` and I'm checking whether the</span></div>
+<div class="ln"><span><span class="t">│  │</span>  Pi-hole DNS change can be scoped to the container instead of the host.</span></div>
+<div class="ln"><span><span class="t">│  │</span></span></div>
+<div class="ln"><span><span class="t">│  └─</span> <span class="y">since then</span> <span class="d">· 2 turns · 3 tool calls · reading /etc/systemd/resolved.conf.d/</span></span></div>
+<div class="ln"><span><span class="t">│</span></span></div>
+<div class="ln"><span><span class="t">└─</span> <span class="d">… 5 older · space</span></span></div>
+
+<!-- ══════════ collapsed groups ══════════ -->
+<div class="ln grp"><span><span class="a">▸ wayland-computer-use</span>  <span class="d">22 sessions · latest yesterday ·</span> Write up the WCU Braid adapter results</span></div>
+<div class="ln"><span><span class="a">▸ dotprivate</span>            <span class="d">3 sessions · latest 3h ago ·</span> Can dotprivate sync stand in for a selected-files commit?</span></div>
+<div class="ln"><span><span class="a">▸ skald</span>                 <span class="d">2 sessions · latest 1h ago ·</span> Skald TUI mockup <span class="d">· imported desktop export</span></span></div>
+<div class="ln"><span><span class="a">▸ </span><span class="d">no project</span>            <span class="d">5 sessions · latest yesterday ·</span> When do Claude Code and Codex actually write a recap?</span></div>
+
+    </div>
+
+    <div class="keys">
+      <b>↑↓</b>select <b>space</b>expand <b>⏎</b>read transcript <b>h</b>recaps <b>o</b>jump to pane <b>g</b>group <b>/</b>filter <b>s</b>search <b>q</b>quit
+    </div>
+
+  </div>
+</div>
+</div>
+</body>
+</html>

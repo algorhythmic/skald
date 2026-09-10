@@ -1,0 +1,19 @@
+{
+  "sessions": 100,
+  "records": 20000,
+  "source_bytes": 3908890,
+  "archive_bytes": 104779776,
+  "archive_to_source_ratio": 26.81,
+  "backfill_seconds": 9.446,
+  "list_samples": 30,
+  "list_median_ms": 47.639,
+  "list_p95_ms": 49.186,
+  "timing_scope": "compiled CLI process + Unix socket + archive list + JSON output",
+  "fixture": "small synthetic Claude records; warm local caches; no Heimdall or Braid",
+  "date": "2026-09-10",
+  "cpu": "Intel Core i5-8600K CPU @ 3.60GHz",
+  "kernel": "Linux 7.2.3-arch1-3",
+  "go_toolchain": "go1.27.1",
+  "sqlite_driver": "modernc.org/sqlite v1.38.2",
+  "initial_list_p95_ms": 169.214
+}

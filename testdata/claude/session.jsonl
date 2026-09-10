@@ -1,0 +1,8 @@
+{"type":"user","uuid":"u1","sessionId":"synthetic-claude","version":"2.1.263","cwd":"/fixtures/skald","timestamp":"2026-09-09T09:41:00Z","message":{"role":"user","content":"Keep archive history after the source is removed."}}
+{"type":"assistant","uuid":"a1","sessionId":"synthetic-claude","timestamp":"2026-09-09T09:41:30Z","message":{"role":"assistant","content":[{"type":"text","text":"I will check the archive boundaries."},{"type":"tool_use","id":"call-1","name":"Read","input":{"file_path":"README.md"}}]}}
+{"type":"user","uuid":"u2","sessionId":"synthetic-claude","timestamp":"2026-09-09T09:41:40Z","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-1","content":"Synthetic tool output."}]}}
+{"type":"system","subtype":"away_summary","uuid":"recap-1","sessionId":"synthetic-claude","timestamp":"2026-09-09T09:45:00Z","content":"You asked for an independent archive. Next: test source removal."}
+{"type":"ai-title","sessionId":"synthetic-claude","title":"Archive independent conversation history"}
+{"type":"assistant","sessionId":"synthetic-claude","timestamp":"2026-09-09T09:46:00Z","message":{"role":"assistant","content":"The source-removal fixture is ready."}}
+{"type":"assistant","sessionId":"synthetic-claude","timestamp":"2026-09-09T09:46:00Z","message":{"role":"assistant","content":"The source-removal fixture is ready."}}
+{"type":"future_record","sessionId":"synthetic-claude","unknown_field":{"preserve":"these original bytes"}}

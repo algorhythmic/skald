@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "poll_interval_ms": 1000,
+  "max_database_bytes": 4294967296,
+  "min_free_bytes": 268435456,
+  "allow_raw": false,
+  "sources": [
+    {
+      "namespace": "fixture:claude",
+      "provider": "claude_code",
+      "stream_id": "fixture-claude",
+      "root": "../testdata/claude",
+      "path": "session.jsonl"
+    },
+    {
+      "namespace": "fixture:codex",
+      "provider": "codex",
+      "stream_id": "fixture-codex",
+      "root": "../testdata/codex",
+      "path": "session.jsonl"
+    }
+  ]
+}

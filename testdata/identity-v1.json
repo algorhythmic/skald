@@ -1,0 +1,76 @@
+[
+  {
+    "domain": "namespace",
+    "fields": [
+      "claude_code",
+      "fixture-host",
+      "/fixtures/claude",
+      ""
+    ],
+    "canonical_hex": "73657373696f6e7265636f726400763100000000096e616d6573706163650000000b636c617564655f636f64650000000c666978747572652d686f7374000000102f66697874757265732f636c6175646500000000",
+    "key": "sr1:namespace:02939a17f3d41a8a3f101a7156bfa9a3d657dc26dfa5906f06c9d624c27c8a27"
+  },
+  {
+    "domain": "conversation",
+    "fields": [
+      "fixture:claude",
+      "session-42"
+    ],
+    "canonical_hex": "73657373696f6e7265636f7264007631000000000c636f6e766572736174696f6e0000000e666978747572653a636c617564650000000a73657373696f6e2d3432",
+    "key": "sr1:conversation:73175a1b8d4d17306cc8bee3383527ce04ffbd10d34c9333a432be04b05c0559"
+  },
+  {
+    "domain": "record",
+    "fields": [
+      "conversation",
+      "fixture:conversation:42",
+      "native",
+      "message-1"
+    ],
+    "canonical_hex": "73657373696f6e7265636f726400763100000000067265636f72640000000c636f6e766572736174696f6e00000017666978747572653a636f6e766572736174696f6e3a3432000000066e6174697665000000096d6573736167652d31",
+    "key": "sr1:record:7a97912e8f727ce04a68044d28d0036aa2e7898b0aa7188cfccba768488a9716"
+  },
+  {
+    "domain": "record",
+    "fields": [
+      "conversation",
+      "fixture:conversation:42",
+      "ordinal",
+      "fixture:g1",
+      "107"
+    ],
+    "canonical_hex": "73657373696f6e7265636f726400763100000000067265636f72640000000c636f6e766572736174696f6e00000017666978747572653a636f6e766572736174696f6e3a3432000000076f7264696e616c0000000a666978747572653a673100000003313037",
+    "key": "sr1:record:a8c4b08b1762396dfe7fda6fbf50c0132fa68aeed462fc3ac65c0eb3de06b9a9"
+  },
+  {
+    "domain": "record",
+    "fields": [
+      "conversation",
+      "ab",
+      "native",
+      "c"
+    ],
+    "canonical_hex": "73657373696f6e7265636f726400763100000000067265636f72640000000c636f6e766572736174696f6e000000026162000000066e61746976650000000163",
+    "key": "sr1:record:c5b9e182d9fccb42c36070e2f6eb3cfb79acbcdba586a5ba30e908e025b678b4"
+  },
+  {
+    "domain": "record",
+    "fields": [
+      "conversation",
+      "a",
+      "native",
+      "bc"
+    ],
+    "canonical_hex": "73657373696f6e7265636f726400763100000000067265636f72640000000c636f6e766572736174696f6e0000000161000000066e6174697665000000026263",
+    "key": "sr1:record:4ac05c29f5e2042dfc22095bfcc093c2fb500f6818d3cd40873fb87461e595e1"
+  },
+  {
+    "domain": "conversation",
+    "fields": [
+      "fixture:雪",
+      "café"
+    ],
+    "canonical_hex": "73657373696f6e7265636f7264007631000000000c636f6e766572736174696f6e0000000b666978747572653ae99baa00000005636166c3a9",
+    "key": "sr1:conversation:0eb88f0c15644909b9991d85a4d15432c9b9e648eb7bbc5f380013ed368dac41"
+  }
+]
