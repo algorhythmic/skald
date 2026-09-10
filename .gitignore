@@ -1,6 +1,9 @@
 /bin/
 /.cache/
 /.tools/
+/pkg/
+/src/
+*.pkg.tar.zst
 *.db
 *.db-shm
 *.db-wal
