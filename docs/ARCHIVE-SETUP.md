@@ -61,7 +61,7 @@ Each entry requires:
 
 - `namespace`: stable shared collection identity, also used by any independent
   consumer of the same native source. No namespace is invented from a title or cwd.
-- `provider`: `claude_code` or `codex`.
+- `provider`: `claude_code`, `codex` or `devin`.
 - `stream_id`: stable configured logical stream token. Keep it when the same
   stream moves or rotates; distinct native streams need distinct tokens.
 - `root`: configured source directory, absolute or relative to the configuration

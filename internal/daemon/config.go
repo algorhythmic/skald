@@ -90,7 +90,7 @@ func LoadConfig(path string) (Config, error) {
 	}
 	for i := range cfg.Discovery {
 		r := &cfg.Discovery[i]
-		if r.Namespace == "" || len(r.Namespace) > 256 || r.Root == "" || r.MaxSessions < 1 || r.MaxSessions > 256 || len(r.RootAliases) > 16 || (r.Provider != sessioncapture.Claude && r.Provider != sessioncapture.Codex) {
+		if r.Namespace == "" || len(r.Namespace) > 256 || r.Root == "" || r.MaxSessions < 1 || r.MaxSessions > 256 || len(r.RootAliases) > 16 || (r.Provider != sessioncapture.Claude && r.Provider != sessioncapture.Codex && r.Provider != sessioncapture.Devin) {
 			return cfg, errors.New("invalid_discovery_configuration")
 		}
 		if namespaces[r.Namespace] {

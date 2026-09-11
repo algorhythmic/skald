@@ -20,6 +20,7 @@ const AdapterVersion = "jsonl-v1.0.0"
 const (
 	Claude = "claude_code"
 	Codex  = "codex"
+	Devin  = "devin"
 )
 
 type Source struct {
@@ -84,7 +85,7 @@ func (s Source) validate() error {
 	if s.Namespace == "" || s.StreamID == "" {
 		return errors.New("namespace_and_stream_id_required")
 	}
-	if s.Provider != Claude && s.Provider != Codex {
+	if s.Provider != Claude && s.Provider != Codex && s.Provider != Devin {
 		return errors.New("unsupported_provider")
 	}
 	return nil

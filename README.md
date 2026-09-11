@@ -35,8 +35,10 @@ To connect real local conversations, preview and save your chosen sources:
 ```sh
 ./bin/skald sources --provider claude_code
 ./bin/skald sources --provider codex
+./bin/skald sources --provider devin
 ./bin/skald connect --provider claude_code
 ./bin/skald connect --provider codex --max-sessions 128
+./bin/skald connect --provider devin
 ./bin/skald serve
 ```
 

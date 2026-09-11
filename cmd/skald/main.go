@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode"
@@ -22,8 +25,8 @@ Start here:
   skald [tui flags]        start the archive daemon if needed and open the TUI
 
 Source connection:
-  skald sources --provider claude_code|codex [--root DIRECTORY] [--since RFC3339|all] [--limit 10]
-  skald connect --provider claude_code|codex [--root DIRECTORY] [--config FILE]
+  skald sources --provider claude_code|codex|devin [--root DIRECTORY] [--since RFC3339|all] [--limit 10]
+  skald connect --provider claude_code|codex|devin [--root DIRECTORY] [--config FILE]
                 [--namespace ID] [--since RFC3339|all] [--max-sessions 64]
 
 Archive commands:
@@ -37,9 +40,9 @@ Archive commands:
   skald restore --backup FILE --data-dir NEW_DIRECTORY
 
 Foundation commands (read-only):
-  skald inspect --provider claude_code|codex --namespace ID --stream-id ID --file FILE
+  skald inspect --provider claude_code|codex|devin --namespace ID --stream-id ID --file FILE
                 [--conversation-id ID] [--checkpoint FILE] [--limit 256] [--raw]
-  skald probe --provider claude_code|codex --provider-version VERSION
+  skald probe --provider claude_code|codex|devin --provider-version VERSION
   skald discover --root DIRECTORY [--limit 1000]
   skald validate --file RECORD.json
   skald version
@@ -157,14 +160,26 @@ func run(args []string, out, stderr io.Writer) error {
 				return errors.New("invalid_checkpoint_json")
 			}
 		}
-		input, err := os.Open(*file)
-		if err != nil {
-			return errors.New("source_unavailable")
-		}
-		defer input.Close()
-		info, err := input.Stat()
-		if err != nil || !info.Mode().IsRegular() {
-			return errors.New("regular_source_file_required")
+		var input io.ReadSeeker
+		if *provider == sessioncapture.Devin {
+			// A store snapshot is canonicalized to JSONL for inspection, the
+			// same path the daemon collector takes.
+			dump, err := sessioncapture.DevinDump(context.Background(), filepath.Dir(*file), filepath.Base(*file))
+			if err != nil {
+				return err
+			}
+			input = bytes.NewReader(dump)
+		} else {
+			f, err := os.Open(*file)
+			if err != nil {
+				return errors.New("source_unavailable")
+			}
+			defer f.Close()
+			info, err := f.Stat()
+			if err != nil || !info.Mode().IsRegular() {
+				return errors.New("regular_source_file_required")
+			}
+			input = f
 		}
 		limits := sessioncapture.DefaultLimits()
 		limits.Records = *limit

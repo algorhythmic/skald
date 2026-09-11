@@ -115,7 +115,7 @@ func (c *Collector) discover(ctx context.Context) {
 				status.Enrolled++
 			}
 		}
-		candidates, err := sessioncapture.Inventory(ctx, root.Root, root.ModifiedSince, 100000)
+		candidates, err := sessioncapture.Inventory(ctx, root.Root, root.Provider, root.ModifiedSince, 100000)
 		if err != nil {
 			status.State = "unavailable"
 			status.Issues["root"] = discoveryError(err)
@@ -228,26 +228,39 @@ func locatorAbsent(r archive.Registration) (bool, error) {
 	return false, err
 }
 func verifyRelocation(ctx context.Context, r archive.Registration, cp sessioncapture.Checkpoint) error {
-	root, err := os.OpenRoot(r.Root)
-	if err != nil {
-		return err
-	}
-	defer root.Close()
-	f, err := root.OpenFile(r.Path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() || info.Size() < cp.Offset {
-		return errors.New("prefix_unavailable")
-	}
 	h := sha256.New()
-	if _, err := io.CopyN(h, cancelReader{f, ctx}, cp.Offset); err != nil {
-		return err
+	if r.Provider == sessioncapture.Devin {
+		dump, err := sessioncapture.DevinDump(ctx, r.Root, r.Path)
+		if err != nil {
+			return err
+		}
+		if int64(len(dump)) < cp.Offset {
+			return errors.New("prefix_unavailable")
+		}
+		if _, err := h.Write(dump[:cp.Offset]); err != nil {
+			return err
+		}
+	} else {
+		root, err := os.OpenRoot(r.Root)
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		f, err := root.OpenFile(r.Path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() || info.Size() < cp.Offset {
+			return errors.New("prefix_unavailable")
+		}
+		if _, err := io.CopyN(h, cancelReader{f, ctx}, cp.Offset); err != nil {
+			return err
+		}
 	}
 	if "sha256:"+hex.EncodeToString(h.Sum(nil)) != cp.PrefixDigest {
 		return errors.New("prefix_mismatch")

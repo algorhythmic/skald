@@ -22,7 +22,7 @@ func TestDiscoveryConfinementAndNativeIdentity(t *testing.T) {
 	os.Symlink(outside, filepath.Join(root, "escape-dir"))
 	os.Mkdir(filepath.Join(root, "subagents"), 0700)
 	os.WriteFile(filepath.Join(root, "subagents", "agent.jsonl"), []byte(raw), 0600)
-	candidates, err := Inventory(ctx, root, time.Time{}, 100)
+	candidates, err := Inventory(ctx, root, Claude, time.Time{}, 100)
 	if err != nil || len(candidates) != 1 {
 		t.Fatal(candidates, err)
 	}
@@ -33,10 +33,10 @@ func TestDiscoveryConfinementAndNativeIdentity(t *testing.T) {
 	if _, err := Identify(ctx, root, "escape.jsonl", Claude); err == nil {
 		t.Fatal("escaping symlink read")
 	}
-	if _, err := Inventory(ctx, root, time.Time{}, 1); err == nil || err.Error() != "discovery_limit_exceeded" {
+	if _, err := Inventory(ctx, root, Claude, time.Time{}, 1); err == nil || err.Error() != "discovery_limit_exceeded" {
 		t.Fatal("partial inventory passed", err)
 	}
-	if v, err := Inventory(ctx, root, time.Now().Add(time.Hour), 100); err != nil || len(v) != 0 {
+	if v, err := Inventory(ctx, root, Claude, time.Now().Add(time.Hour), 100); err != nil || len(v) != 0 {
 		t.Fatal("cutoff ignored")
 	}
 	os.WriteFile(filepath.Join(root, "conflict.jsonl"), []byte(raw+strings.Replace(raw, "native-session", "different", 1)), 0600)

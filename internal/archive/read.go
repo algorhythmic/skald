@@ -120,7 +120,8 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
  coalesce(title.title,s.native_id),coalesce(title.record_key,''),coalesce(title.source_revision,''),coalesce(title.origin,''),coalesce(title.ordering_ambiguous,0),
  (SELECT count(*) FROM artifact_versions v JOIN artifacts a USING(record_key) WHERE a.conversation_key=s.conversation_key),
  CASE WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='available') THEN 'available'
- WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health IN ('blocked','capture_gaps')) THEN 'blocked'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health='blocked') THEN 'blocked'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health='capture_gaps') THEN 'capture_gaps'
  WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health NOT IN ('unavailable','unknown')) THEN 'partial'
  WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health='unknown') THEN 'unknown'
  ELSE 'unavailable' END,

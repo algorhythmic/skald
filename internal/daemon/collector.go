@@ -1,8 +1,10 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -110,7 +112,12 @@ func (c *Collector) Scan(ctx context.Context) bool {
 			c.issue(source.Key(), "capture_blocked")
 		}
 
-		if !batch.More && !batch.Pending && !batch.Blocked && stampErr == nil && batch.Checkpoint.Offset == stamp.Size {
+		consumed := batch.Checkpoint.Offset == stamp.Size
+		if source.Provider == sessioncapture.Devin {
+			// The canonical dump, not the file size, is the captured extent.
+			consumed = true
+		}
+		if !batch.More && !batch.Pending && !batch.Blocked && stampErr == nil && consumed {
 			if after, err := sourceStamp(source); err == nil && after == stamp {
 				if c.verified == nil {
 					c.verified = map[string]verifiedFile{}
@@ -159,7 +166,20 @@ func captureFile(ctx context.Context, r archive.Registration, cp sessioncapture.
 	if !before.Mode().IsRegular() {
 		return sessioncapture.Batch{}, errors.New("regular_source_required")
 	}
-	batch, err := sessioncapture.Read(cancelReader{f, ctx}, r.Source, cp, sessioncapture.DefaultLimits(), time.Now())
+	var input io.ReadSeeker = cancelReader{f, ctx}
+	if r.Provider == sessioncapture.Devin {
+		// The store rewrites committed rows while a session is active; defer
+		// until the WAL is quiet rather than churning generations per update.
+		if !sessioncapture.DevinQuiet(r.Root, r.Path) {
+			return sessioncapture.Batch{Records: []sessioncapture.Captured{}, Gaps: []sessioncapture.Gap{}, Checkpoint: cp, Pending: true}, nil
+		}
+		dump, err := sessioncapture.DevinDump(ctx, r.Root, r.Path)
+		if err != nil {
+			return sessioncapture.Batch{}, err
+		}
+		input = bytes.NewReader(dump)
+	}
+	batch, err := sessioncapture.Read(input, r.Source, cp, sessioncapture.DefaultLimits(), time.Now())
 	if err != nil {
 		return sessioncapture.Batch{}, err
 	}

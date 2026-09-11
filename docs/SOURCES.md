@@ -41,11 +41,18 @@ Use `--config FILE` for a separate configuration. Writes are locked, validated,
 atomic, and mode 0600. A repeated connection preserves its namespace, cutoff and
 capacity unless those options are explicitly changed.
 
-The default source directories are `${CLAUDE_CONFIG_DIR:-~/.claude}/projects` and
-`${CODEX_HOME:-~/.codex}/sessions`. Pass `--root DIRECTORY` for a different profile,
-export directory, or provider location. Only selected roots are inventoried.
-Browser/cloud conversations and separate desktop chat databases are not covered
-by these two adapters.
+The default source directories are `${CLAUDE_CONFIG_DIR:-~/.claude}/projects`,
+`${CODEX_HOME:-~/.codex}/sessions` and
+`${DEVIN_DESKTOP_CONFIG:-~/.config/Devin}/User/acp-messages`. Pass `--root DIRECTORY`
+for a different profile, export directory, or provider location. Only selected
+roots are inventoried. Browser/cloud conversations are not covered.
+
+Devin desktop keeps each session as a private SQLite store under
+`acp-messages/`. Capture canonicalizes committed rows (`meta` + `messages`) to
+JSONL; the same offset, generation and digest machinery then applies. The store
+has no timestamps, so sessions carry no source time. A live session rewrites
+rows in place, so capture defers while its WAL is quieting down rather than
+recording a generation per update.
 
 The initial cutoff is saved as a fixed timestamp. Existing older files are not
 initially enrolled, but an older conversation modified after the cutoff becomes

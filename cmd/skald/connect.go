@@ -42,13 +42,19 @@ func defaultSourceRoot(provider string) (string, error) {
 			base = filepath.Join(home, ".codex")
 		}
 		return filepath.Join(base, "sessions"), nil
+	case sessioncapture.Devin:
+		base := os.Getenv("DEVIN_DESKTOP_CONFIG")
+		if base == "" {
+			base = filepath.Join(home, ".config", "Devin")
+		}
+		return filepath.Join(base, "User", "acp-messages"), nil
 	}
 	return "", errors.New("unsupported_provider")
 }
 func runConnect(args []string, out, stderr io.Writer) error {
 	f := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	f.SetOutput(stderr)
-	provider := f.String("provider", "", "claude_code or codex")
+	provider := f.String("provider", "", "claude_code, codex or devin")
 	root := f.String("root", "", "explicit source root; defaults to the provider's local conversation directory")
 	config := f.String("config", "", "source configuration; defaults to the private Skald config directory")
 	namespace := f.String("namespace", "", "stable namespace override (persisted once)")
@@ -65,7 +71,7 @@ func runConnect(args []string, out, stderr io.Writer) error {
 	if f.NArg() != 0 {
 		return errors.New("unexpected_arguments")
 	}
-	if *provider != sessioncapture.Claude && *provider != sessioncapture.Codex {
+	if *provider != sessioncapture.Claude && *provider != sessioncapture.Codex && *provider != sessioncapture.Devin {
 		return errors.New("supported_provider_required")
 	}
 	visited := map[string]bool{}
@@ -110,7 +116,7 @@ func runConnect(args []string, out, stderr io.Writer) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if args[0] == "sources" {
-		candidates, err := sessioncapture.Inventory(ctx, canonical, cutoff, 100000)
+		candidates, err := sessioncapture.Inventory(ctx, canonical, *provider, cutoff, 100000)
 		if err != nil {
 			return err
 		}

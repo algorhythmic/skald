@@ -1,7 +1,8 @@
 # Skald implementation status
 
 2026-09-10. **Source connection, archive daemon and native TUI are implemented and verified.**
-Skald can now enroll primary conversations in selected Claude/Codex roots,
+Skald can now enroll primary conversations in selected Claude/Codex roots and
+Devin desktop session stores (`acp-messages` SQLite),
 retain independent history, serve bounded reads, and back up/restore its archive.
 The TUI browses project groups, bounded excerpts, native recaps and transcript
 history through the socket API. Retrieval and peer integrations remain future work. The full release gates below remain open.
@@ -91,7 +92,8 @@ checks. Dependency versions and checksums are pinned in `go.mod` / `go.sum`.
   restoration, root confinement, ordinary record ordering, raw projection policy,
   invalid requests, bounded pages, and absent peer services.
 - Compiled native acceptance passed against a private real Unix socket: 17 original
-  records across two providers, a pending appended record, SIGKILL/restart to 18
+  records across two JSONL providers plus the canonicalized Devin store, a
+  pending appended record, SIGKILL/restart to 18
   records without duplicates, source deletion, exact original reads, online backup,
   fresh restore with no native files, and graceful shutdown. No test daemon remains.
 

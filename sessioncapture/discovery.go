@@ -32,7 +32,14 @@ type Identity struct {
 // Inventory walks an explicitly selected root through an os.Root. Symlinks and
 // Claude subagent streams are excluded. An entry bound limits directory work;
 // its failure is explicit rather than silently treating partial coverage as full.
-func Inventory(ctx context.Context, root string, since time.Time, maxEntries int) ([]Candidate, error) {
+func candidateFile(name, provider string) bool {
+	if provider == Devin {
+		return strings.HasSuffix(name, ".db")
+	}
+	return strings.HasSuffix(name, ".jsonl")
+}
+
+func Inventory(ctx context.Context, root, provider string, since time.Time, maxEntries int) ([]Candidate, error) {
 	if maxEntries < 1 || maxEntries > 100000 {
 		return nil, errors.New("invalid_discovery_limit")
 	}
@@ -63,7 +70,7 @@ func Inventory(ctx context.Context, root string, since time.Time, maxEntries int
 			}
 			return nil
 		}
-		if !e.Type().IsRegular() || !strings.HasSuffix(e.Name(), ".jsonl") || strings.HasPrefix(e.Name(), "agent-") {
+		if !e.Type().IsRegular() || !candidateFile(e.Name(), provider) || strings.HasPrefix(e.Name(), "agent-") {
 			return nil
 		}
 		info, err := e.Info()
@@ -94,11 +101,14 @@ func Inventory(ctx context.Context, root string, since time.Time, maxEntries int
 // comes from a filename, title, cwd or observation time.
 func Identify(ctx context.Context, root, path, provider string) (Identity, error) {
 	out := Identity{ProviderVersion: "unknown", Evidence: "bounded_native_prefix"}
-	if provider != Claude && provider != Codex {
+	if provider != Claude && provider != Codex && provider != Devin {
 		return out, errors.New("unsupported_provider")
 	}
 	if !filepath.IsLocal(path) {
 		return out, errors.New("invalid_source_path")
+	}
+	if provider == Devin {
+		return identifyDevin(ctx, root, path)
 	}
 	dir, err := os.OpenRoot(root)
 	if err != nil {

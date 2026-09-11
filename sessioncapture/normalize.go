@@ -38,6 +38,14 @@ func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time) (sessio
 			if sub := str(native, "subtype"); sub != "" {
 				nativeKind += "/" + sub
 			}
+		} else if source.Provider == Devin {
+			// Canonical store lines carry kind/position/payload; identity is the
+			// database's native session UUID established at enrollment.
+			nativeKind = str(native, "kind")
+			if nativeKind == "" {
+				nativeKind = "unknown"
+			}
+			id = source.ConversationID
 		} else if nativeKind == "session_meta" {
 			p := obj(native, "payload")
 			id = str(p, "id")
@@ -85,6 +93,8 @@ func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time) (sessio
 	}
 	if source.Provider == Claude {
 		normalizeClaude(native, &r)
+	} else if source.Provider == Devin {
+		normalizeDevin(native, &r)
 	} else {
 		normalizeCodex(native, &r)
 	}

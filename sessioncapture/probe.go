@@ -43,7 +43,12 @@ func Probe(provider, version string) Capabilities {
 		c.NativeRecap = Capability{State: "unsupported", Reason: "native_tui_recap_not_persisted"}
 		c.LiveCollection = Capability{State: "fixture_verified", Reason: "configured_file_tail_and_restart_tests"}
 	}
-	if provider != Claude && provider != Codex {
+	if provider == Devin {
+		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "acp_messages_table"}
+		c.NativeRecap = Capability{State: "unsupported", Reason: "no_native_recap_in_store"}
+		c.LiveCollection = Capability{State: "fixture_verified", Reason: "sqlite_snapshot_dump"}
+	}
+	if provider != Claude && provider != Codex && provider != Devin {
 		c.OrdinaryContent = Capability{State: "unsupported", Reason: "unsupported_provider"}
 		c.NativeRecap = c.OrdinaryContent
 		c.LiveCollection = c.OrdinaryContent
