@@ -40,6 +40,9 @@ func (m *model) overview() {
 		}
 		m.add(marker+single(s.Title), "bright", i, -1, "")
 		meta := "│    " + s.Provider + " · activity " + s.Activity + " · source " + s.SourceHealth + fmt.Sprintf(" · %d versions", s.RecordVersions)
+		if s.TitleKind == "derived" {
+			meta += " · derived title"
+		}
 		m.add(single(meta), "dim", i, -1, "")
 		if len(s.Projects) > 1 || s.ProjectsTruncated {
 			m.add("│    multiple observed projects · association retained with source reference", "dim", i, -1, "")
@@ -222,7 +225,7 @@ func (m *model) draw(screen tcell.Screen) {
 	}
 	put(screen, 2, 1, w-4, "skald", m.palette.accent.Bold(true))
 	state := "daemon offline · cached"
-	st := m.palette.warn
+	st := m.palette.bad
 	if m.connected {
 		state = "daemon connected"
 		st = m.palette.green
@@ -445,7 +448,7 @@ func (m *model) overlay(screen tcell.Screen, title string, lines []string) {
 }
 func (m *model) drawHelp(screen tcell.Screen) {
 	m.overlay(screen, "skald / keyboard", []string{
-		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source or all     /  filter this session page", "h  open recaps     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  switch desktop/amber theme", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the recent 25-record window. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
+		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source or all     /  filter this session page", "h  open recaps     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  cycle heimdall/desktop/amber themes", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the recent 25-record window. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
 }
 func (m *model) drawReference(screen tcell.Screen) {
 	e := m.selectedEntry()

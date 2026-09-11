@@ -48,6 +48,12 @@ recent 25-record window. A newer assistant message becomes a labeled excerpt wit
 the earlier recap retained. Newer user/tool activity leaves the recap in place and
 adds an activity notice. With neither, the native title remains the fallback.
 
+A conversation without a native title record shows a derived title instead of its
+native ID: the first line of the earliest substantive user message, labeled
+`derived title` in the row metadata and attributable through the sessions API.
+Injected context blocks and history preambles are never eligible; a native title
+replaces the derived projection when one arrives.
+
 This is a bounded display selection, not the plan's full archive-wide description
 projection. An earlier recap outside the window requires history paging. No model
 summarizes anything. Ordering ambiguity across streams or rewrite epochs is labeled;
@@ -102,17 +108,21 @@ while reading and announces newer archive changes; `r` reloads the latest page.
 Pagination cursors expire after an archive change or restore. Skald restarts the
 page instead of mixing records from different archive boundaries.
 
-Skald defaults to `--theme desktop`: your terminal's foreground, background and
-ANSI palette supply the colors. When the terminal follows your desktop theme,
-Skald follows it too, including palette changes applied by the terminal while
-Skald is running. Selection keeps the normal background and uses a subdued side
-line and accented pointer. Search matches use emphasis, so no fixed dark
-background is imposed.
+Skald defaults to `--theme heimdall`: a fixed dark palette shared with the
+heimdall TUI — cool black background, warm cream text, gold accents, and red
+for failures such as a disconnected daemon.
 
-Use `--theme amber` for the original design palette, or press `t` to switch themes
-in the running TUI. The toggle lasts for that run. Set `SKALD_THEME=desktop` or
-`SKALD_THEME=amber` to choose a default; an explicit `--theme` takes precedence.
-For example, `SKALD_THEME=amber make demo` runs the demo with the amber palette.
+Use `--theme desktop` to let your terminal's foreground, background and ANSI
+palette supply the colors. When the terminal follows your desktop theme, Skald
+follows it too, including palette changes applied by the terminal while Skald
+is running. Selection keeps the normal background and uses a subdued side line
+and accented pointer. Search matches use emphasis, so no fixed dark background
+is imposed. `--theme amber` selects the original design palette.
+
+Press `t` to cycle themes in the running TUI. The toggle lasts for that run.
+Set `SKALD_THEME` to heimdall, desktop or amber to choose a default; an
+explicit `--theme` takes precedence. For example, `SKALD_THEME=amber make demo`
+runs the demo with the amber palette.
 `NO_COLOR` is respected in both themes with readable emphasis and selection attributes.
 Text wraps by Unicode grapheme and line boundaries. Escape sequences, control
 characters and bidirectional overrides are made visible. Conversation text, shell

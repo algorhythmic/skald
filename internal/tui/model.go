@@ -54,7 +54,7 @@ type model struct {
 }
 
 func newModel() *model {
-	return &model{palette: paletteFor(ThemeDesktop), expanded: true, sessionCursors: []string{""}, transcriptCursors: []string{""}, notice: "Connecting to archive…"}
+	return &model{palette: paletteFor(ThemeHeimdall), expanded: true, sessionCursors: []string{""}, transcriptCursors: []string{""}, notice: "Connecting to archive…"}
 }
 
 var groupNames = []string{"project", "provider", "source", "all"}

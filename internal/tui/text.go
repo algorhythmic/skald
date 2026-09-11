@@ -129,10 +129,14 @@ func displayStyle(screen tcell.Screen, style tcell.Style) tcell.Style {
 	}
 	fg, bg, _ := style.Decompose()
 	style = style.Foreground(tcell.ColorDefault).Background(tcell.ColorDefault)
-	if fg == tcell.NewHexColor(0xe3a23a) || fg == tcell.NewHexColor(0xecece3) {
+	switch fg {
+	case tcell.NewHexColor(0xe3a23a), tcell.NewHexColor(0xecece3),
+		tcell.NewHexColor(0xe5a727), tcell.NewHexColor(0xd36b55):
 		style = style.Bold(true)
 	}
-	if bg == tcell.NewHexColor(0x282820) || bg == tcell.NewHexColor(0x403520) {
+	switch bg {
+	case tcell.NewHexColor(0x282820), tcell.NewHexColor(0x403520),
+		tcell.NewHexColor(0x1d232a):
 		style = style.Reverse(true)
 	}
 	return style

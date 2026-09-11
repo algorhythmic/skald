@@ -289,16 +289,20 @@ type monochromeScreen struct{ tcell.Screen }
 func (s monochromeScreen) Colors() int { return 0 }
 func TestMonochromeUsesAttributesWithoutBrightnessInversion(t *testing.T) {
 	screen := monochromeScreen{}
-	p := paletteFor(ThemeAmber)
-	for _, style := range []tcell.Style{p.base, p.dim, p.accent, p.bright, p.border} {
-		fg, bg, attr := displayStyle(screen, style).Decompose()
-		if fg != tcell.ColorDefault || bg != tcell.ColorDefault || attr&tcell.AttrReverse != 0 {
-			t.Fatal("implicit monochrome inversion")
+	for _, theme := range []Theme{ThemeHeimdall, ThemeAmber} {
+		p := paletteFor(theme)
+		for _, style := range []tcell.Style{p.base, p.dim, p.accent, p.bright, p.border} {
+			fg, bg, attr := displayStyle(screen, style).Decompose()
+			if fg != tcell.ColorDefault || bg != tcell.ColorDefault || attr&tcell.AttrReverse != 0 {
+				t.Fatal("implicit monochrome inversion")
+			}
 		}
 	}
-	_, _, attr := displayStyle(screen, p.base.Background(tcell.NewHexColor(0x282820))).Decompose()
-	if attr&tcell.AttrReverse == 0 {
-		t.Fatal("selection lacks monochrome emphasis")
+	for _, bg := range []tcell.Color{tcell.NewHexColor(0x1d232a), tcell.NewHexColor(0x282820)} {
+		_, _, attr := displayStyle(screen, tcell.StyleDefault.Background(bg)).Decompose()
+		if attr&tcell.AttrReverse == 0 {
+			t.Fatal("selection lacks monochrome emphasis")
+		}
 	}
 }
 

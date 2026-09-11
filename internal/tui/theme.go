@@ -9,30 +9,42 @@ import (
 type Theme string
 
 const (
-	ThemeDesktop Theme = "desktop"
-	ThemeAmber   Theme = "amber"
+	ThemeHeimdall Theme = "heimdall"
+	ThemeDesktop  Theme = "desktop"
+	ThemeAmber    Theme = "amber"
 )
 
 func ParseTheme(value string) (Theme, error) {
 	switch Theme(value) {
-	case ThemeDesktop, ThemeAmber:
+	case ThemeHeimdall, ThemeDesktop, ThemeAmber:
 		return Theme(value), nil
 	default:
-		return "", errors.New("invalid_theme; use_desktop_or_amber")
+		return "", errors.New("invalid_theme; use_heimdall_desktop_or_amber")
 	}
 }
 
 type palette struct {
-	theme                                          Theme
-	base, bright, accent, dim, green, warn, border tcell.Style
+	theme                                               Theme
+	base, bright, accent, dim, green, warn, bad, border tcell.Style
 }
 
 func paletteFor(theme Theme) palette {
+	if theme == ThemeHeimdall {
+		// Heimdall's dark palette: cool black background, warm cream text, gold
+		// accents, red reserved for failures such as a disconnected daemon.
+		base := tcell.StyleDefault.Background(tcell.NewHexColor(0x0e1012)).Foreground(tcell.NewHexColor(0xd4cfc3))
+		return palette{theme: theme, base: base, bright: base.Bold(true),
+			accent: base.Foreground(tcell.NewHexColor(0xe5a727)), dim: base.Foreground(tcell.NewHexColor(0x78818e)),
+			green: base.Foreground(tcell.NewHexColor(0x80ac68)), warn: base.Foreground(tcell.NewHexColor(0xe5a727)),
+			bad:    base.Foreground(tcell.NewHexColor(0xd36b55)),
+			border: base.Foreground(tcell.NewHexColor(0x394048))}
+	}
 	if theme == ThemeAmber {
 		base := tcell.StyleDefault.Background(tcell.NewHexColor(0x1b1b18)).Foreground(tcell.NewHexColor(0xa7a79a))
 		return palette{theme: theme, base: base, bright: base.Foreground(tcell.NewHexColor(0xecece3)),
 			accent: base.Foreground(tcell.NewHexColor(0xe3a23a)), dim: base.Foreground(tcell.NewHexColor(0x77776d)),
 			green: base.Foreground(tcell.NewHexColor(0x8fc96b)), warn: base.Foreground(tcell.NewHexColor(0xe7c25a)),
+			bad:    base.Foreground(tcell.NewHexColor(0xd36b55)),
 			border: base.Foreground(tcell.NewHexColor(0x4a4a43))}
 	}
 	// Leave foreground/background unspecified so both light and dark terminal
@@ -42,6 +54,7 @@ func paletteFor(theme Theme) palette {
 	return palette{theme: ThemeDesktop, base: base, bright: base.Bold(true),
 		accent: base.Foreground(tcell.PaletteColor(3)).Bold(true), dim: base.Dim(true),
 		green: base.Foreground(tcell.PaletteColor(2)), warn: base.Foreground(tcell.PaletteColor(3)),
+		bad:    base.Foreground(tcell.PaletteColor(1)),
 		border: base.Dim(true)}
 }
 func (p palette) tone(s string) tcell.Style {
@@ -60,6 +73,9 @@ func (p palette) tone(s string) tcell.Style {
 	return p.base
 }
 func (p palette) selected(style tcell.Style) tcell.Style {
+	if p.theme == ThemeHeimdall {
+		return style.Background(tcell.NewHexColor(0x1d232a))
+	}
 	if p.theme == ThemeAmber {
 		return style.Background(tcell.NewHexColor(0x282820))
 	}
@@ -68,6 +84,9 @@ func (p palette) selected(style tcell.Style) tcell.Style {
 	return style.Background(tcell.ColorDefault).Reverse(false)
 }
 func (p palette) match(style tcell.Style) tcell.Style {
+	if p.theme == ThemeHeimdall {
+		return style.Foreground(tcell.NewHexColor(0xe5a727)).Background(tcell.NewHexColor(0x1d232a))
+	}
 	if p.theme == ThemeAmber {
 		return style.Background(tcell.NewHexColor(0x403520))
 	}

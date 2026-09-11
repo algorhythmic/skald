@@ -269,8 +269,11 @@ func runScreen(ctx context.Context, screen tcell.Screen, backend Backend, theme 
 				}
 				if key == 't' {
 					next := ThemeDesktop
-					if m.palette.theme == ThemeDesktop {
+					switch m.palette.theme {
+					case ThemeDesktop:
 						next = ThemeAmber
+					case ThemeAmber:
+						next = ThemeHeimdall
 					}
 					m.palette = paletteFor(next)
 					screen.SetStyle(displayStyle(screen, m.palette.base))

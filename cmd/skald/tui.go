@@ -23,9 +23,9 @@ func runTUI(args []string, stderr io.Writer, ensure bool) error {
 	f.SetOutput(stderr)
 	defaultTheme := os.Getenv("SKALD_THEME")
 	if defaultTheme == "" {
-		defaultTheme = string(tui.ThemeDesktop)
+		defaultTheme = string(tui.ThemeHeimdall)
 	}
-	themeName := f.String("theme", defaultTheme, "colors: desktop (terminal palette) or amber")
+	themeName := f.String("theme", defaultTheme, "colors: heimdall (default), desktop (terminal palette), or amber")
 	socket := f.String("socket", "", "private daemon socket")
 	ns := f.String("namespace", "", "narrow to a configured namespace")
 	if err := f.Parse(args); err != nil {
