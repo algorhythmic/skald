@@ -318,6 +318,9 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 					return err
 				}
 			}
+			if err := updateActivity(ctx, tx, *rec.ConversationKey, r.Key(), cp.Epoch, rec); err != nil {
+				return err
+			}
 		}
 		var cwd string
 		if raw, ok := rec.Extensions["native_cwd"]; ok && json.Unmarshal(raw, &cwd) == nil && cwd != "" && len(cwd) <= 4096 {
@@ -366,6 +369,71 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 	return capacityError(tx.Commit())
 }
 
+// activitySignal extracts a conversation activity signal from one record.
+// lifecycle_observation state (working/idle) comes from the provider; an
+// unanswered input-request tool call (AskUserQuestion, request_user_input)
+// signals input. Everything else carries no signal.
+func activitySignal(rec sessionrecord.Record) string {
+	if rec.Kind == "lifecycle_observation" && (rec.Body.State == "working" || rec.Body.State == "idle") {
+		return rec.Body.State
+	}
+	if rec.Kind == "tool_call" {
+		for _, p := range rec.Body.Parts {
+			if p.Name == "AskUserQuestion" || p.Name == "request_user_input" {
+				return "input"
+			}
+		}
+	}
+	return ""
+}
+
+// updateActivity projects the latest signal and newest observed position per
+// conversation. Only records on the winning stream move the projection; records
+// on other streams mark ordering ambiguous rather than inventing order.
+func updateActivity(ctx context.Context, tx *sql.Tx, conv, stream string, epoch int64, rec sessionrecord.Record) error {
+	ord := rec.SourceOrder.Ordinal
+	var sourceTime any
+	if rec.SourceTime != nil {
+		sourceTime = stamp(*rec.SourceTime)
+	}
+	sig := activitySignal(rec)
+	var curStream, curSignal string
+	var sigEpoch, sigOrd, seenEpoch, seenOrd int64
+	var sigTime, seenTime any
+	err := tx.QueryRowContext(ctx, `SELECT stream_key,signal,signal_epoch,signal_ordinal,signal_time,seen_epoch,seen_ordinal,seen_time
+ FROM session_activity WHERE conversation_key=?`, conv).Scan(&curStream, &curSignal, &sigEpoch, &sigOrd, &sigTime, &seenEpoch, &seenOrd, &seenTime)
+	if err == sql.ErrNoRows {
+		signal := "none"
+		var st any
+		se, so := int64(0), int64(0)
+		if sig != "" {
+			signal, se, so, st = sig, epoch, ord, sourceTime
+		}
+		_, err := tx.ExecContext(ctx, "INSERT INTO session_activity VALUES (?,?,?,?,?,?,?,?,?,0)",
+			conv, stream, signal, se, so, st, epoch, ord, sourceTime)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if curStream != stream {
+		_, err := tx.ExecContext(ctx, "UPDATE session_activity SET ordering_ambiguous=1 WHERE conversation_key=?", conv)
+		return err
+	}
+	if sig != "" && (curSignal == "none" || epoch > sigEpoch || (epoch == sigEpoch && ord >= sigOrd)) {
+		curSignal, sigEpoch, sigOrd, sigTime = sig, epoch, ord, sourceTime
+	}
+	if epoch > seenEpoch || (epoch == seenEpoch && ord > seenOrd) {
+		seenEpoch, seenOrd = epoch, ord
+		if sourceTime != nil {
+			seenTime = sourceTime
+		}
+	}
+	_, err = tx.ExecContext(ctx, `UPDATE session_activity SET signal=?,signal_epoch=?,signal_ordinal=?,signal_time=?,seen_epoch=?,seen_ordinal=?,seen_time=?
+ WHERE conversation_key=?`, curSignal, sigEpoch, sigOrd, sigTime, seenEpoch, seenOrd, seenTime, conv)
+	return err
+}
+
 // derivedTitle projects the first substantive user message into a display
 // title for conversations whose provider never writes a native title record.
 // Injected context blocks and history/caveat preambles are not eligible; the
@@ -375,7 +443,11 @@ func derivedTitle(rec sessionrecord.Record) (string, bool) {
 		return "", false
 	}
 	text := strings.TrimSpace(rec.Body.Text)
-	if i := strings.IndexByte(text, '\n'); i >= 0 {
+	if strings.HasPrefix(text, "The following is the Codex agent history") {
+		// Approval-assessment rollouts wrap the assessed work in an APPROVAL
+		// REQUEST block whose "justification" describes it in natural language.
+		text = approvalJustification(text)
+	} else if i := strings.IndexByte(text, '\n'); i >= 0 {
 		text = strings.TrimSpace(text[:i])
 	}
 	if text == "" || strings.HasPrefix(text, "<") ||
@@ -388,6 +460,22 @@ func derivedTitle(rec sessionrecord.Record) (string, bool) {
 		runes = runes[:240]
 	}
 	return string(runes), true
+}
+
+// approvalJustification recovers the described action from a Codex
+// approval-assessment preamble. The message is text, not JSON, so the quoted
+// field is decoded directly from its last occurrence.
+func approvalJustification(text string) string {
+	const mark = `"justification":`
+	i := strings.LastIndex(text, mark)
+	if i < 0 {
+		return ""
+	}
+	var just string
+	if json.NewDecoder(strings.NewReader(text[i+len(mark):])).Decode(&just) != nil {
+		return ""
+	}
+	return just
 }
 
 // reprojectTitles backfills title rows for sessions captured before the
@@ -531,6 +619,77 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,ordering_ambiguous,origin)
  VALUES (?,?,?,?,?,?,?,?,?,'derived')`, conv, p.recordKey, p.revision, p.adapter, p.title, p.stream, p.epoch, p.ordinal, ambiguous); err != nil {
+			return err
+		}
+	}
+	// Activity projections: newest observed position plus the latest signal per
+	// conversation. Envelopes are decoded only for signal-carrying kinds.
+	rows, err = tx.QueryContext(ctx, `SELECT a.conversation_key,o.stream_key,g.epoch,o.ordinal,n.source_time,n.kind,
+ json_extract(n.envelope_json,'$.body.state'),n.envelope_json
+ `+position+`
+ WHERE a.conversation_key NOT IN (SELECT conversation_key FROM session_activity)
+ ORDER BY a.conversation_key,g.epoch DESC,o.ordinal DESC,o.stream_key`)
+	if err != nil {
+		return err
+	}
+	type activity struct {
+		stream           string
+		seenE, seenO     int64
+		seenT            any
+		signal           string
+		sigE, sigO       int64
+		sigT             any
+		sigFound         bool
+		streams          map[string]bool
+	}
+	acts := map[string]*activity{}
+	for rows.Next() {
+		var conv, stream, kind, envelope string
+		var epoch, ordinal int64
+		var sourceTime, bodyState any
+		if err := rows.Scan(&conv, &stream, &epoch, &ordinal, &sourceTime, &kind, &bodyState, &envelope); err != nil {
+			rows.Close()
+			return err
+		}
+		a := acts[conv]
+		if a == nil {
+			a = &activity{stream: stream, seenE: epoch, seenO: ordinal, seenT: sourceTime, streams: map[string]bool{}}
+			acts[conv] = a
+		}
+		a.streams[stream] = true
+		if a.sigFound {
+			continue
+		}
+		sig := ""
+		if kind == "lifecycle_observation" {
+			if s, ok := bodyState.(string); ok && (s == "working" || s == "idle") {
+				sig = s
+			}
+		} else if kind == "tool_call" {
+			if rec, err := sessionrecord.Decode([]byte(envelope)); err == nil {
+				sig = activitySignal(rec)
+			}
+		}
+		if sig != "" {
+			a.signal, a.sigE, a.sigO, a.sigT, a.sigFound = sig, epoch, ordinal, sourceTime, true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for conv, a := range acts {
+		signal := a.signal
+		if !a.sigFound {
+			signal = "none"
+		}
+		ambiguous := 0
+		if len(a.streams) > 1 {
+			ambiguous = 1
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO session_activity(conversation_key,stream_key,signal,signal_epoch,signal_ordinal,signal_time,seen_epoch,seen_ordinal,seen_time,ordering_ambiguous)
+ VALUES (?,?,?,?,?,?,?,?,?,?)`, conv, a.stream, signal, a.sigE, a.sigO, a.sigT, a.seenE, a.seenO, a.seenT, ambiguous); err != nil {
 			return err
 		}
 	}

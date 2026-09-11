@@ -52,7 +52,17 @@ A conversation without a native title record shows a derived title instead of it
 native ID: the first line of the earliest substantive user message, labeled
 `derived title` in the row metadata and attributable through the sessions API.
 Injected context blocks and history preambles are never eligible; a native title
-replaces the derived projection when one arrives.
+replaces the derived projection when one arrives. Codex approval-assessment
+rollouts derive from the embedded action justification. Sessions with no eligible
+evidence show a shortened native ID, and duplicate titles within one group gain a
+short ID suffix.
+
+The circle before each session is archived activity evidence, not live presence:
+`●` a recent working signal, `◐` an unanswered input request or a stale working
+signal, `●` red when capture reports a problem (`blocked`/`capture_gaps`), and
+`○` for idle or unknown. The row metadata shows `activity` (working, idle, input,
+unknown), the newest record's source time, and flags ambiguous cross-stream
+signal ordering.
 
 This is a bounded display selection, not the plan's full archive-wide description
 projection. An earlier recap outside the window requires history paging. No model

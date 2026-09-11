@@ -24,6 +24,7 @@ type line struct {
 	row   int
 	entry int
 	mark  string
+	dot   string
 }
 type model struct {
 	palette                                                         palette

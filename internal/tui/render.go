@@ -6,12 +6,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/algorhythmic/skald/internal/archive"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/uniseg"
 )
 
 func (m *model) add(text, color string, row, entry int, mark string) {
-	m.lines = append(m.lines, line{text, color, row, entry, mark})
+	m.lines = append(m.lines, line{text, color, row, entry, mark, ""})
 }
 func (m *model) paragraph(text, prefix, color string, row, entry, maxLines int) {
 	lines := wrap(text, max(1, min(m.width-8-uniseg.StringWidth(prefix), 108)))
@@ -23,8 +24,68 @@ func (m *model) paragraph(text, prefix, color string, row, entry, maxLines int) 
 		m.add(prefix+s, color, row, entry, "")
 	}
 }
+// activityDot maps archived evidence to the mockup's status circle:
+// green working signal, amber input requested or stale working, red capture
+// problem, empty circle for idle or unknown activity.
+func (m *model) activityDot(s archive.Session) (string, string) {
+	if s.SourceHealth == "blocked" {
+		return "●", "bad"
+	}
+	switch s.Activity {
+	case "input":
+		return "◐", "warn"
+	case "working":
+		if fresh(s.LastRecordTime) {
+			return "●", "green"
+		}
+		return "◐", "warn"
+	default:
+		return "○", "dim"
+	}
+}
+
+// fresh treats a working signal as current only while the newest archived
+// record is recent; stale evidence renders as amber rather than green.
+func fresh(ts *string) bool {
+	if ts == nil {
+		return false
+	}
+	t, err := time.Parse(time.RFC3339Nano, *ts)
+	return err == nil && time.Since(t) < 15*time.Minute
+}
+
+func ago(ts string) string {
+	t, err := time.Parse(time.RFC3339Nano, ts)
+	if err != nil {
+		return ""
+	}
+	switch d := time.Since(t); {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// shortID keeps an untitled session row readable; the full native ID remains
+// available through the transcript and record references.
+func shortID(id string) string {
+	if i := strings.IndexByte(id, '-'); i > 0 {
+		return id[:i]
+	}
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
 func (m *model) overview() {
 	lastGroup := ""
+	seenTitles := map[string]bool{}
 	for i, r := range m.rows {
 		s := r.session
 		if r.group != lastGroup {
@@ -33,15 +94,32 @@ func (m *model) overview() {
 			}
 			m.add("▾ "+single(r.group), "amber", -1, -1, "")
 			lastGroup = r.group
+			seenTitles = map[string]bool{}
 		}
-		marker := "├─ ○ "
+		dot, dotTone := m.activityDot(s)
+		marker := "├─ " + dot + " "
 		if i == m.selected {
-			marker = "▸  ○ "
+			marker = "▸  " + dot + " "
 		}
-		m.add(marker+single(s.Title), "bright", i, -1, "")
+		title := s.Title
+		if s.TitleKind == "" {
+			title = shortID(title)
+		}
+		if seenTitles[title] {
+			title += " · " + shortID(s.NativeID)
+		}
+		seenTitles[title] = true
+		m.add(marker+single(title), "bright", i, -1, "")
+		m.lines[len(m.lines)-1].dot = dotTone
 		meta := "│    " + s.Provider + " · activity " + s.Activity + " · source " + s.SourceHealth + fmt.Sprintf(" · %d versions", s.RecordVersions)
 		if s.TitleKind == "derived" {
 			meta += " · derived title"
+		}
+		if s.LastRecordTime != nil {
+			meta += " · " + ago(*s.LastRecordTime)
+		}
+		if s.ActivityAmbiguous {
+			meta += " · activity order ambiguous"
 		}
 		m.add(single(meta), "dim", i, -1, "")
 		if len(s.Projects) > 1 || s.ProjectsTruncated {
@@ -57,7 +135,7 @@ func (m *model) overview() {
 			} else if m.detailKey == s.Key {
 				m.description(i)
 			}
-			m.add("│    Enter transcript  ·  h recaps  ·  surface unavailable", "amber", i, -1, "")
+			m.add("╰─▸  Enter transcript  ·  h recaps  ·  surface unavailable", "amber", i, -1, "")
 		}
 	}
 	if len(m.rows) == 0 {
@@ -300,22 +378,22 @@ func (m *model) draw(screen tcell.Screen) {
 	}
 	bodyHeight := h - 10
 	offset := m.scroll
+	selStart, selEnd := -1, -1
 	if !m.transcript {
-		start, end := -1, -1
 		for i, l := range m.lines {
 			if l.row == m.selected {
-				if start < 0 {
-					start = i
+				if selStart < 0 {
+					selStart = i
 				}
-				end = i
+				selEnd = i
 			}
 		}
-		if start >= 0 {
-			if start < m.overviewScroll {
-				m.overviewScroll = start
+		if selStart >= 0 {
+			if selStart < m.overviewScroll {
+				m.overviewScroll = selStart
 			}
-			if end >= m.overviewScroll+bodyHeight {
-				m.overviewScroll = max(0, min(start, end-bodyHeight+1))
+			if selEnd >= m.overviewScroll+bodyHeight {
+				m.overviewScroll = max(0, min(selStart, selEnd-bodyHeight+1))
 			}
 		}
 		m.overviewScroll = min(max(0, m.overviewScroll), max(0, len(m.lines)-bodyHeight))
@@ -337,8 +415,25 @@ func (m *model) draw(screen tcell.Screen) {
 			st = m.palette.match(st)
 		}
 		put(screen, 3, y+6, w-6, l.text, st)
-		if !m.transcript && l.row == m.selected && m.palette.theme == ThemeDesktop {
-			put(screen, 1, y+6, 1, "│", m.palette.accent.Bold(false).Dim(true))
+		if l.dot != "" {
+			mainc, comb, _, _ := screen.GetContent(6, y+6)
+			screen.SetContent(6, y+6, mainc, comb, displayStyle(screen, m.palette.tone(l.dot)))
+		}
+		if !m.transcript && l.row == m.selected && m.palette.theme != ThemeAmber {
+			left, right := "│", "│"
+			if m.palette.theme == ThemeHeimdall {
+				switch offset + y {
+				case selStart:
+					left, right = "╭", "╮"
+				case selEnd:
+					left, right = "╰", "╯"
+				}
+				if selStart == selEnd {
+					left = "▸"
+				}
+				put(screen, w-2, y+6, 1, right, m.palette.focusBorder())
+			}
+			put(screen, 1, y+6, 1, left, m.palette.focusBorder())
 			if strings.HasPrefix(l.text, "▸") {
 				put(screen, 3, y+6, 1, "▸", m.palette.accent)
 			}
@@ -353,7 +448,7 @@ func (m *model) draw(screen tcell.Screen) {
 			}
 			status = fmt.Sprintf("page %d from latest · %s · lines %d–%d / %d", m.transcriptPage+1, kind, min(offset+1, len(m.lines)), min(offset+bodyHeight, len(m.lines)), len(m.lines))
 		} else {
-			status = "Activity unknown · source health is independent · / filters this page · ? help"
+			status = "● working · ◐ input/stale · ● source problem · ○ idle or unknown · ? help"
 		}
 	}
 	if m.transcript && m.page.Boundary < m.snapshot.Sessions.Boundary && m.page.Boundary != 0 {

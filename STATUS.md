@@ -39,8 +39,14 @@ history through the socket API. Retrieval and peer integrations remain future wo
   provider emits them, otherwise a bounded projection of the first line of the
   earliest substantive user message — labeled `title_kind` with record provenance
   and backfilled for previously archived conversations. Injected context blocks
-  are not eligible; a later native title replaces the derived one.
-- SQLite schema 3 with original bytes, immutable source and normalization versions,
+  are not eligible; a later native title replaces the derived one. Approval-
+  assessment preambles contribute their embedded action justification.
+- Conversation activity is projected from native lifecycle observations
+  (working/idle) and unanswered input-request tool calls, with the newest
+  observed record position and time. A consumed input request reads as working;
+  cross-stream signal ordering is labeled ambiguous. This is archived evidence,
+  not live presence.
+- SQLite schema 4 with original bytes, immutable source and normalization versions,
   separate source-order observations/generation epochs, checkpoint/change commits,
   capture gaps, source health, record heads and project observations. Native titles
   have bounded attributable projections; ambiguous cross-stream ordering is labeled.

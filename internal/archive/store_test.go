@@ -426,6 +426,41 @@ func TestDerivedTitleProjectionAndReprojection(t *testing.T) {
 	}
 }
 
+func TestActivityProjectionSignalsAndConsumedInput(t *testing.T) {
+	ctx := context.Background()
+	s, r, raw := codexStore(t)
+	batch := testBatch(t, raw, r, sessioncapture.Checkpoint{})
+	mustIngest(t, s, r, sessioncapture.Checkpoint{}, batch)
+	page, err := s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal(err)
+	}
+	// The fixture ends with a native task_complete observation.
+	if page.Items[0].Activity != "idle" || page.Items[0].LastRecordTime == nil {
+		t.Fatal("lifecycle evidence did not project activity", page.Items[0].Activity)
+	}
+	input := []byte("{\"type\":\"response_item\",\"payload\":{\"type\":\"function_call\",\"name\":\"request_user_input\",\"arguments\":\"{}\",\"call_id\":\"c1\"},\"timestamp\":\"2026-09-10T00:00:09Z\"}\n")
+	next := testBatch(t, append(append([]byte{}, raw...), input...), r, batch.Checkpoint)
+	mustIngest(t, s, r, batch.Checkpoint, next)
+	page, err = s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items[0].Activity != "input" {
+		t.Fatal("unanswered input request not projected", page.Items[0].Activity)
+	}
+	reply := []byte("{\"type\":\"response_item\",\"payload\":{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"yes continue\"}]},\"timestamp\":\"2026-09-10T00:00:10Z\"}\n")
+	last := testBatch(t, append(append([]byte{}, raw...), append(input, reply...)...), r, next.Checkpoint)
+	mustIngest(t, s, r, next.Checkpoint, last)
+	page, err = s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items[0].Activity != "working" {
+		t.Fatal("answered input request stayed pending", page.Items[0].Activity)
+	}
+}
+
 func TestSchemaTwoUpgradeHasRecoveryCopy(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "data")
 	if err := privateDir(dir); err != nil {

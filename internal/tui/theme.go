@@ -69,8 +69,18 @@ func (p palette) tone(s string) tcell.Style {
 		return p.green
 	case "warn":
 		return p.warn
+	case "bad":
+		return p.bad
 	}
 	return p.base
+}
+// focusBorder styles the panel edge beside the selected block. Heimdall marks
+// the focused section with a full gold border; desktop keeps a subdued line.
+func (p palette) focusBorder() tcell.Style {
+	if p.theme == ThemeHeimdall {
+		return p.accent
+	}
+	return p.accent.Bold(false).Dim(true)
 }
 func (p palette) selected(style tcell.Style) tcell.Style {
 	if p.theme == ThemeHeimdall {

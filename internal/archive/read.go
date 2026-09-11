@@ -41,6 +41,8 @@ type Session struct {
 	RecordVersions         int64              `json:"record_versions"`
 	SourceHealth           string             `json:"source_health"`
 	Activity               string             `json:"activity"`
+	ActivityAmbiguous      bool               `json:"activity_ordering_ambiguous"`
+	LastRecordTime         *string            `json:"last_record_time,omitempty"`
 }
 type Artifact struct {
 	Key        string  `json:"record_key"`
@@ -118,10 +120,15 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
  coalesce(title.title,s.native_id),coalesce(title.record_key,''),coalesce(title.source_revision,''),coalesce(title.origin,''),coalesce(title.ordering_ambiguous,0),
  (SELECT count(*) FROM artifact_versions v JOIN artifacts a USING(record_key) WHERE a.conversation_key=s.conversation_key),
  CASE WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='available') THEN 'available'
- WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health NOT IN ('unavailable','unknown')) THEN 'partial'
- WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='unknown') THEN 'unknown'
- ELSE 'unavailable' END
- FROM sessions s JOIN sources src USING(namespace) LEFT JOIN session_titles title USING(conversation_key)
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health IN ('blocked','capture_gaps')) THEN 'blocked'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health NOT IN ('unavailable','unknown')) THEN 'partial'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health='unknown') THEN 'unknown'
+ ELSE 'unavailable' END,
+ coalesce(act.signal,''),coalesce(act.signal_epoch,-1),coalesce(act.signal_ordinal,-1),
+ coalesce(act.seen_epoch,-1),coalesce(act.seen_ordinal,-1),act.seen_time,coalesce(act.ordering_ambiguous,0)
+ FROM sessions s JOIN sources src USING(namespace)
+ LEFT JOIN session_titles title USING(conversation_key)
+ LEFT JOIN session_activity act ON act.conversation_key=s.conversation_key
  WHERE s.namespace IN (`+in+`) AND s.conversation_key>? ORDER BY s.conversation_key LIMIT ?`, args...)
 	if err != nil {
 		return result, err
@@ -130,13 +137,28 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
 	for rows.Next() {
 		var item Session
 		var titleKey, titleRevision string
-		if err := rows.Scan(&item.Key, &item.Namespace, &item.Provider, &item.NativeID, &item.Title, &titleKey, &titleRevision, &item.TitleKind, &item.TitleOrderingAmbiguous, &item.RecordVersions, &item.SourceHealth); err != nil {
+		var signal string
+		var sigEpoch, sigOrd, seenEpoch, seenOrd int64
+		var seenTime sql.NullString
+		var actAmbiguous int
+		if err := rows.Scan(&item.Key, &item.Namespace, &item.Provider, &item.NativeID, &item.Title, &titleKey, &titleRevision, &item.TitleKind, &item.TitleOrderingAmbiguous, &item.RecordVersions, &item.SourceHealth, &signal, &sigEpoch, &sigOrd, &seenEpoch, &seenOrd, &seenTime, &actAmbiguous); err != nil {
 			return result, err
 		}
 		if titleKey != "" {
 			item.TitleRef = &sessionrecord.Ref{RecordKey: titleKey, SourceRevision: titleRevision}
 		}
-		item.Activity = "unknown"
+		// A consumed input request (newer evidence exists) reads as working.
+		item.Activity = signal
+		if signal == "input" && (seenEpoch > sigEpoch || (seenEpoch == sigEpoch && seenOrd > sigOrd)) {
+			item.Activity = "working"
+		}
+		if item.Activity == "" || item.Activity == "none" {
+			item.Activity = "unknown"
+		}
+		item.ActivityAmbiguous = actAmbiguous != 0
+		if seenTime.Valid {
+			item.LastRecordTime = &seenTime.String
+		}
 		result.Items = append(result.Items, item)
 	}
 	if err := rows.Err(); err != nil {

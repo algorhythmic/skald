@@ -27,7 +27,10 @@ with fixture_daemon() as (socket, daemon):
             environment.pop("NO_COLOR", None)
         else:
             environment["NO_COLOR"] = "1"
-        proc = subprocess.Popen([str(BINARY), "tui", "--socket", str(socket)], stdin=slave, stdout=slave, stderr=slave,
+        argv = [str(BINARY), "tui", "--socket", str(socket)]
+        if shutdown == "q":
+            argv += ["--theme", "desktop"]
+        proc = subprocess.Popen(argv, stdin=slave, stdout=slave, stderr=slave,
                                 env=environment, preexec_fn=child_terminal)
         output = bytearray()
 

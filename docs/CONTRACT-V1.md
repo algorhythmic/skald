@@ -105,7 +105,10 @@ rewriting a normalization's first envelope or source bytes. The schema-2 daemon
 migration adds locators, record heads, native-title projections, generation epochs and
 project observations. The schema-3 migration labels each projected title `native`
 or `derived`; a derived title is the first line of the earliest substantive user
-message, keeps record provenance, and yields to any later native title.
+message, keeps record provenance, and yields to any later native title. The
+schema-4 migration projects per-conversation activity: the latest native
+lifecycle signal or unanswered input request, the newest observed record
+position and source time, and an ordering-ambiguity label across streams.
 A sole-writer service now commits capture batches, serves
 reads and creates/restores consistent backups. Later group/surface/description/
 index tables belong to their owning milestones. Suppression tombstones already
