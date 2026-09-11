@@ -53,14 +53,20 @@ native ID: the first line of the earliest substantive user message, labeled
 `derived title` in the row metadata and attributable through the sessions API.
 Injected context blocks and history preambles are never eligible; a native title
 replaces the derived projection when one arrives. Codex approval-assessment
-rollouts derive from the embedded action justification. Sessions with no eligible
-evidence show a shortened native ID, and duplicate titles within one group gain a
-short ID suffix.
+rollouts derive from the embedded action justification. Codex compaction-resume
+sessions — files that start from an encrypted compaction blob — inherit
+`Continuation of <parent title>` from the parent thread named in their
+`session_meta` when that parent is archived and titled; the metadata labels it
+`continued session`. Sessions with no eligible evidence show a shortened native
+ID, and sessions sharing an identical display title inside one group fold into
+a single `Title ×N` row; Enter expands the row to list the members (each
+suffixed with a short ID) and collapses it again. Untitled sessions share the
+`(untitled)` label, so stub sessions collapse the same way.
 
 The circle before each session is archived activity evidence, not live presence:
-`●` a recent working signal, `◐` an unanswered input request or a stale working
-signal, `●` red when capture reports a problem (`blocked`/`capture_gaps`), and
-`○` for idle or unknown. The row metadata shows `activity` (working, idle, input,
+`●` a recent working signal, `◐` an unanswered input request, a stale working
+signal or a source that recorded capture gaps, `●` red when capture is blocked,
+and `○` for idle or unknown. The row metadata shows `activity` (working, idle, input,
 unknown), the newest record's source time, and flags ambiguous cross-stream
 signal ordering.
 
@@ -68,8 +74,9 @@ This is a bounded display selection, not the plan's full archive-wide descriptio
 projection. An earlier recap outside the window requires history paging. No model
 summarizes anything. Ordering ambiguity across streams or rewrite epochs is labeled;
 source arrival time is never used to invent chronology. Unknown recap coverage
-stays unknown. Activity remains `unknown`; archived lifecycle observations are
-shown as historical evidence, not live working state or completed conversations.
+stays unknown. Activity is archived evidence: lifecycle observations where
+providers emit them, newest-record shape where they do not — never live working
+state or completed conversations.
 
 ## Transcript
 

@@ -115,6 +115,13 @@ func identifyDevin(ctx context.Context, root, path string) (Identity, error) {
 	if tables != 2 {
 		return out, errors.New("conversation_identity_unavailable")
 	}
+	var messages int
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM messages").Scan(&messages); err != nil {
+		return out, errors.New("source_unavailable")
+	}
+	if messages == 0 {
+		return out, errors.New("empty_session_store")
+	}
 	var version string
 	if err := db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='schema_version'").Scan(&version); err == nil && version != "" {
 		out.ProviderVersion = "acp-store-" + version
@@ -166,9 +173,20 @@ func normalizeDevin(n object, r *sessionrecord.Record) {
 		}
 		if input := obj(content, "rawInput"); input != nil {
 			part.Text = str(input, "command")
+			exts := map[string]json.RawMessage{}
 			if wd := str(input, "workdir"); wd != "" && len(wd) <= 4096 {
 				v, _ := json.Marshal(wd)
-				r.Extensions = map[string]json.RawMessage{"native_cwd": v}
+				exts["native_cwd"] = v
+			}
+			for _, k := range []string{"file_path", "path"} {
+				if fp := str(input, k); strings.HasPrefix(fp, "/") && len(fp) <= 4096 {
+					v, _ := json.Marshal(fp)
+					exts["native_file_path"] = v
+					break
+				}
+			}
+			if len(exts) > 0 {
+				r.Extensions = exts
 			}
 		}
 		r.Kind = "tool_call"

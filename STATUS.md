@@ -44,9 +44,11 @@ history through the socket API. Retrieval and peer integrations remain future wo
   assessment preambles contribute their embedded action justification.
 - Conversation activity is projected from native lifecycle observations
   (working/idle) and unanswered input-request tool calls, with the newest
-  observed record position and time. A consumed input request reads as working;
-  cross-stream signal ordering is labeled ambiguous. This is archived evidence,
-  not live presence.
+  observed record position and time. Providers without lifecycle records
+  (Claude, Devin) derive the signal from the newest record's shape — an open
+  user tail or a tool call in flight is working evidence, a reply tail is idle
+  evidence. A consumed input request reads as working; cross-stream signal
+  ordering is labeled ambiguous. This is archived evidence, not live presence.
 - SQLite schema 4 with original bytes, immutable source and normalization versions,
   separate source-order observations/generation epochs, checkpoint/change commits,
   capture gaps, source health, record heads and project observations. Native titles
@@ -132,7 +134,9 @@ Large native transcripts still incur repeated full-prefix hashing per batch.
    surface and portable-preservation integrations under their existing milestones.
 
 Local read-only metadata and bounded parsing samples verified Claude 2.1.263 and
-Codex 0.153.4 native files, including desktop-origin Codex data. No personal
+Codex 0.153.4 native files, including desktop-origin Codex data, and the Devin
+desktop acp-messages store (13 session databases: canonical dumps, native titles,
+file-path project evidence, quiet-gated capture). No personal
 conversation bodies were persisted in test fixtures or archived during verification.
 Only this project's files, build caches, prepared connection config and temporary
 synthetic test data were written. No provider hooks, user services, desktop

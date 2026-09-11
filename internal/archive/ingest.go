@@ -295,7 +295,7 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
  ON CONFLICT(conversation_key) DO UPDATE SET
  record_key=excluded.record_key,source_revision=excluded.source_revision,adapter_version=excluded.adapter_version,
  title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal,origin='native'
- WHERE session_titles.origin='derived' OR (session_titles.stream_key=excluded.stream_key AND (excluded.epoch>session_titles.epoch OR
+ WHERE session_titles.origin IN ('derived','continuation') OR (session_titles.stream_key=excluded.stream_key AND (excluded.epoch>session_titles.epoch OR
  (excluded.epoch=session_titles.epoch AND excluded.ordinal>=session_titles.ordinal)))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, string(text), r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
 					return err
 				}
@@ -309,9 +309,9 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
  VALUES (?,?,?,?,?,?,?,?,0,'derived')
  ON CONFLICT(conversation_key) DO UPDATE SET
  record_key=excluded.record_key,source_revision=excluded.source_revision,adapter_version=excluded.adapter_version,
- title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal
- WHERE session_titles.origin='derived' AND session_titles.stream_key=excluded.stream_key AND (excluded.epoch<session_titles.epoch OR
- (excluded.epoch=session_titles.epoch AND excluded.ordinal<session_titles.ordinal))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, title, r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
+ title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal,origin='derived'
+ WHERE session_titles.origin='continuation' OR (session_titles.origin='derived' AND session_titles.stream_key=excluded.stream_key AND (excluded.epoch<session_titles.epoch OR
+ (excluded.epoch=session_titles.epoch AND excluded.ordinal<session_titles.ordinal)))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, title, r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
 					return err
 				}
 				if _, err := tx.ExecContext(ctx, "UPDATE session_titles SET ordering_ambiguous=1 WHERE conversation_key=? AND stream_key!=? AND origin='derived'", *rec.ConversationKey, r.Key()); err != nil {
@@ -325,6 +325,18 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 		var cwd string
 		if raw, ok := rec.Extensions["native_cwd"]; ok && json.Unmarshal(raw, &cwd) == nil && cwd != "" && len(cwd) <= 4096 {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO session_projects VALUES (?,?,?,?) ON CONFLICT DO NOTHING", *rec.ConversationKey, cwd, rec.RecordKey, rec.SourceRevision); err != nil {
+				return err
+			}
+		}
+		var parent string
+		if raw, ok := rec.Extensions["native_parent"]; ok && json.Unmarshal(raw, &parent) == nil && parent != "" {
+			if err := continuationTitle(ctx, tx, *rec.ConversationKey, r.Namespace, parent, r.Key(), cp.Epoch, rec); err != nil {
+				return err
+			}
+		}
+		var fp string
+		if raw, ok := rec.Extensions["native_file_path"]; ok && json.Unmarshal(raw, &fp) == nil && fp != "" {
+			if err := commonProjectDir(ctx, tx, *rec.ConversationKey, fp, rec); err != nil {
 				return err
 			}
 		}
@@ -371,17 +383,38 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 
 // activitySignal extracts a conversation activity signal from one record.
 // lifecycle_observation state (working/idle) comes from the provider; an
-// unanswered input-request tool call (AskUserQuestion, request_user_input)
-// signals input. Everything else carries no signal.
+// input-request tool call (AskUserQuestion, request_user_input) signals input,
+// whether it arrives as a standalone record or a message part. Providers
+// without lifecycle records derive turn state from the newest record's shape:
+// a user tail or a tool call in flight is working evidence, a plain agent
+// reply or a recap is idle evidence. Everything else carries no signal.
 func activitySignal(rec sessionrecord.Record) string {
 	if rec.Kind == "lifecycle_observation" && (rec.Body.State == "working" || rec.Body.State == "idle") {
 		return rec.Body.State
 	}
-	if rec.Kind == "tool_call" {
-		for _, p := range rec.Body.Parts {
-			if p.Name == "AskUserQuestion" || p.Name == "request_user_input" {
-				return "input"
+	input, tool := false, false
+	for _, p := range rec.Body.Parts {
+		if p.Name == "AskUserQuestion" || p.Name == "request_user_input" {
+			input = true
+		}
+		if p.Type == "tool_call" {
+			tool = true
+		}
+	}
+	if input {
+		return "input"
+	}
+	if rec.Provider == sessioncapture.Claude || rec.Provider == sessioncapture.Devin {
+		switch rec.Kind {
+		case "message":
+			if rec.Role != nil && *rec.Role == "user" || tool {
+				return "working"
 			}
+			return "idle"
+		case "tool_call":
+			return "working"
+		case "native_recap":
+			return "idle"
 		}
 	}
 	return ""
@@ -432,6 +465,68 @@ func updateActivity(ctx context.Context, tx *sql.Tx, conv, stream string, epoch 
 	_, err = tx.ExecContext(ctx, `UPDATE session_activity SET signal=?,signal_epoch=?,signal_ordinal=?,signal_time=?,seen_epoch=?,seen_ordinal=?,seen_time=?
  WHERE conversation_key=?`, curSignal, sigEpoch, sigOrd, sigTime, seenEpoch, seenOrd, seenTime, conv)
 	return err
+}
+
+// continuationTitle labels a compaction-resume session from its parent
+// thread's title. It never displaces stronger evidence: origin 'continuation'
+// sits below derived and native titles, and yields to either on arrival.
+func continuationTitle(ctx context.Context, tx *sql.Tx, conv, namespace, parentID, stream string, epoch int64, rec sessionrecord.Record) error {
+	var title string
+	err := tx.QueryRowContext(ctx, `SELECT t.title FROM sessions p JOIN session_titles t USING(conversation_key)
+ WHERE p.namespace=? AND p.native_id=? AND t.title!=''`, namespace, parentID).Scan(&title)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	label := []rune("Continuation of " + title)
+	if len(label) > 240 {
+		label = label[:240]
+	}
+	_, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,ordering_ambiguous,origin)
+ VALUES (?,?,?,?,?,?,?,?,0,'continuation')`, conv, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, string(label), stream, epoch, rec.SourceOrder.Ordinal)
+	return err
+}
+
+// commonProjectDir maintains a file-evidence project per conversation: one
+// row holding the longest common directory prefix of native file paths seen
+// in tool inputs. Explicit native_cwd rows are unaffected.
+func commonProjectDir(ctx context.Context, tx *sql.Tx, conv, path string, rec sessionrecord.Record) error {
+	dir := strings.TrimSuffix(path, "/")
+	dir = filepath.Dir(dir)
+	if !strings.HasPrefix(dir, "/") || len(dir) > 4096 {
+		return nil
+	}
+	var stored string
+	err := tx.QueryRowContext(ctx, "SELECT project FROM session_projects WHERE conversation_key=? LIMIT 1").Scan(&stored)
+	if err == sql.ErrNoRows {
+		_, err = tx.ExecContext(ctx, "INSERT INTO session_projects VALUES (?,?,?,?)", conv, dir, rec.RecordKey, rec.SourceRevision)
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	if dir == stored || strings.HasPrefix(dir, stored+"/") {
+		return nil
+	}
+	prefix := commonDirPrefix(dir, stored)
+	if prefix == "" || prefix == "/" || len(strings.Split(strings.Trim(prefix, "/"), "/")) < 3 {
+		// Paths no longer share a plausible workspace root; keep the existing
+		// row rather than collapsing to an unhelpfully generic directory.
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE session_projects SET project=?,record_key=?,source_revision=? WHERE conversation_key=? AND project=?", prefix, rec.RecordKey, rec.SourceRevision, conv, stored)
+	return err
+}
+
+func commonDirPrefix(a, b string) string {
+	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
+	n := 0
+	for n < len(as) && n < len(bs) && as[n] == bs[n] {
+		n++
+	}
+	return strings.Join(as[:n], "/")
 }
 
 // derivedTitle projects the first substantive user message into a display
@@ -506,7 +601,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
  o.stream_key,g.epoch,o.ordinal,c.original_bytes
  `+position+eligible+` JOIN content_objects c ON c.digest=n.source_revision
  WHERE n.kind='opaque_record' AND json_extract(n.envelope_json,'$.native_kind')='ai-title'
- AND (t.origin IS NULL OR t.origin='derived')
+ AND (t.origin IS NULL OR t.origin IN ('derived','continuation'))
  ORDER BY a.conversation_key,g.epoch DESC,o.ordinal DESC,o.stream_key`)
 	if err != nil {
 		return err
@@ -564,7 +659,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
  record_key=excluded.record_key,source_revision=excluded.source_revision,adapter_version=excluded.adapter_version,
  title=excluded.title,stream_key=excluded.stream_key,epoch=excluded.epoch,ordinal=excluded.ordinal,
  ordering_ambiguous=excluded.ordering_ambiguous,origin='native'
- WHERE session_titles.origin='derived'`, conv, p.recordKey, p.revision, p.adapter, p.title, p.stream, p.epoch, p.ordinal, ambiguous); err != nil {
+ WHERE session_titles.origin IN ('derived','continuation')`, conv, p.recordKey, p.revision, p.adapter, p.title, p.stream, p.epoch, p.ordinal, ambiguous); err != nil {
 			return err
 		}
 	}
@@ -622,8 +717,105 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			return err
 		}
 	}
+	// Compaction-resume sessions with no stronger evidence inherit a label
+	// from the parent thread named in their session_meta. The parent pointer
+	// is read from retained raw bytes so pre-extension records qualify.
+	rows, err = tx.QueryContext(ctx, `SELECT a.conversation_key,n.record_key,n.source_revision,n.adapter_version,
+ json_extract(c.original_bytes,'$.payload.session_id'),o.stream_key,g.epoch,o.ordinal,t2.title
+ `+position+` JOIN content_objects c ON c.digest=n.source_revision
+ JOIN sessions sp ON sp.namespace=a.namespace AND sp.native_id=json_extract(c.original_bytes,'$.payload.session_id')
+ JOIN session_titles t2 ON t2.conversation_key=sp.conversation_key
+ WHERE n.kind='opaque_record' AND json_extract(n.envelope_json,'$.native_kind')='session_meta'
+ AND json_extract(c.original_bytes,'$.payload.session_id')!=json_extract(c.original_bytes,'$.payload.id')
+ AND t2.title!='' AND a.conversation_key NOT IN (SELECT conversation_key FROM session_titles)
+ ORDER BY a.conversation_key,g.epoch,o.ordinal,o.stream_key`)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var conv, key, revision, adapter, parent, stream, title string
+		var epoch, ordinal int64
+		if err := rows.Scan(&conv, &key, &revision, &adapter, &parent, &stream, &epoch, &ordinal, &title); err != nil {
+			rows.Close()
+			return err
+		}
+		label := []rune("Continuation of " + title)
+		if len(label) > 240 {
+			label = label[:240]
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,ordering_ambiguous,origin)
+ VALUES (?,?,?,?,?,?,?,?,0,'continuation')`, conv, key, revision, adapter, string(label), stream, epoch, ordinal); err != nil {
+			rows.Close()
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	// File-evidence projects: the longest common directory prefix of native
+	// file paths, for conversations with no explicit project evidence.
+	rows, err = tx.QueryContext(ctx, `SELECT a.conversation_key,n.record_key,n.source_revision,
+ coalesce(json_extract(c.original_bytes,'$.payload.content.rawInput.file_path'),
+  json_extract(c.original_bytes,'$.payload.content.rawInput.path'),'')
+ `+position+` JOIN content_objects c ON c.digest=n.source_revision
+ JOIN streams st ON st.stream_key=o.stream_key JOIN sources src ON src.namespace=st.namespace
+ WHERE src.provider='devin' AND json_extract(n.envelope_json,'$.native_kind')='tool_call'
+ AND a.conversation_key NOT IN (SELECT conversation_key FROM session_projects)
+ ORDER BY a.conversation_key`)
+	if err != nil {
+		return err
+	}
+	type pathPick struct {
+		key, revision string
+		prefix        string
+	}
+	projects := map[string]pathPick{}
+	for rows.Next() {
+		var conv, key, revision, path string
+		if err := rows.Scan(&conv, &key, &revision, &path); err != nil {
+			rows.Close()
+			return err
+		}
+		dir := filepath.Dir(strings.TrimSuffix(path, "/"))
+		if !strings.HasPrefix(dir, "/") || len(dir) > 4096 {
+			continue
+		}
+		p := projects[conv]
+		if p.key == "" {
+			projects[conv] = pathPick{key: key, revision: revision, prefix: dir}
+			continue
+		}
+		if dir == p.prefix || strings.HasPrefix(dir, p.prefix+"/") {
+			continue
+		}
+		p.prefix = commonDirPrefix(dir, p.prefix)
+		p.key, p.revision = key, revision
+		projects[conv] = p
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for conv, p := range projects {
+		if len(strings.Split(strings.Trim(p.prefix, "/"), "/")) < 3 {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, p.prefix, p.key, p.revision); err != nil {
+			return err
+		}
+	}
 	// Activity projections: newest observed position plus the latest signal per
 	// conversation. Envelopes are decoded only for signal-carrying kinds.
+	// Conversations projected before derived signals existed hold 'none' for
+	// providers without lifecycle records; clear those rows so they re-project.
+	if _, err := tx.ExecContext(ctx, `DELETE FROM session_activity WHERE signal='none' AND conversation_key IN
+ (SELECT s.conversation_key FROM sessions s JOIN sources src USING(namespace)
+  WHERE src.provider IN ('claude_code','devin'))`); err != nil {
+		return err
+	}
 	rows, err = tx.QueryContext(ctx, `SELECT a.conversation_key,o.stream_key,g.epoch,o.ordinal,n.source_time,n.kind,
  json_extract(n.envelope_json,'$.body.state'),n.envelope_json
  `+position+`
@@ -665,7 +857,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			if s, ok := bodyState.(string); ok && (s == "working" || s == "idle") {
 				sig = s
 			}
-		} else if kind == "tool_call" {
+		} else if kind == "tool_call" || kind == "message" || kind == "native_recap" {
 			if rec, err := sessionrecord.Decode([]byte(envelope)); err == nil {
 				sig = activitySignal(rec)
 			}

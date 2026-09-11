@@ -86,7 +86,9 @@ func TestArchiveRestartDuplicateAndSourceRemoval(t *testing.T) {
 		t.Fatal("archive lost original source", err)
 	}
 	sessions, err := reopened.Sessions(ctx, []string{r.Namespace}, "", 25)
-	if err != nil || len(sessions.Items) != 1 || sessions.Items[0].SourceHealth != "unavailable" || sessions.Items[0].Activity != "unknown" {
+	// The source file is gone but captured records remain: a reply tail still
+	// reads idle, never working.
+	if err != nil || len(sessions.Items) != 1 || sessions.Items[0].SourceHealth != "unavailable" || sessions.Items[0].Activity != "idle" {
 		t.Fatal("source loss fabricated lifecycle", err)
 	}
 }
@@ -458,6 +460,71 @@ func TestActivityProjectionSignalsAndConsumedInput(t *testing.T) {
 	}
 	if page.Items[0].Activity != "working" {
 		t.Fatal("answered input request stayed pending", page.Items[0].Activity)
+	}
+}
+
+func claudeStore(t *testing.T) (*Store, Registration, []byte) {
+	t.Helper()
+	opts := DefaultOptions()
+	opts.MinFreeBytes = 0
+	s, err := Open(filepath.Join(t.TempDir(), "data"), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	r := Registration{Source: sessioncapture.Source{Namespace: "fixture:claude", Provider: sessioncapture.Claude, StreamID: "fixture"}, Root: t.TempDir(), Path: "session.jsonl"}
+	if err := s.Register(context.Background(), []Registration{r}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile("../../testdata/claude/session.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, r, b
+}
+
+func TestClaudeDerivedActivitySignals(t *testing.T) {
+	ctx := context.Background()
+	s, r, raw := claudeStore(t)
+	batch := testBatch(t, raw, r, sessioncapture.Checkpoint{})
+	mustIngest(t, s, r, sessioncapture.Checkpoint{}, batch)
+	page, err := s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal(err, len(page.Items))
+	}
+	// Claude emits no lifecycle records; the tail is a plain assistant reply.
+	if page.Items[0].Activity != "idle" {
+		t.Fatal("text reply tail did not project idle", page.Items[0].Activity)
+	}
+	user := []byte("{\"type\":\"user\",\"sessionId\":\"synthetic-claude\",\"uuid\":\"u3\",\"timestamp\":\"2026-09-09T09:47:00Z\",\"message\":{\"role\":\"user\",\"content\":\"follow up\"}}\n")
+	next := testBatch(t, append(append([]byte{}, raw...), user...), r, batch.Checkpoint)
+	mustIngest(t, s, r, batch.Checkpoint, next)
+	page, err = s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items[0].Activity != "working" {
+		t.Fatal("open user tail did not project working", page.Items[0].Activity)
+	}
+	ask := []byte("{\"type\":\"assistant\",\"sessionId\":\"synthetic-claude\",\"uuid\":\"a2\",\"timestamp\":\"2026-09-09T09:47:30Z\",\"message\":{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"t1\",\"name\":\"AskUserQuestion\",\"input\":{\"questions\":[]}}]}}\n")
+	third := testBatch(t, append(append(append([]byte{}, raw...), user...), ask...), r, next.Checkpoint)
+	mustIngest(t, s, r, next.Checkpoint, third)
+	page, err = s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items[0].Activity != "input" {
+		t.Fatal("message-embedded AskUserQuestion not projected", page.Items[0].Activity)
+	}
+	done := []byte("{\"type\":\"system\",\"subtype\":\"turn_duration\",\"sessionId\":\"synthetic-claude\",\"uuid\":\"d1\",\"timestamp\":\"2026-09-09T09:48:00Z\",\"durationMs\":4000}\n")
+	last := testBatch(t, append(append(append(append([]byte{}, raw...), user...), ask...), done...), r, third.Checkpoint)
+	mustIngest(t, s, r, third.Checkpoint, last)
+	page, err = s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Items[0].Activity != "idle" {
+		t.Fatal("turn_duration did not project idle", page.Items[0].Activity)
 	}
 }
 

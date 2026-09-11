@@ -126,6 +126,10 @@ func normalizeClaude(n object, r *sessionrecord.Record) {
 			r.Body.Text = s
 			r.Role = textPtr("system")
 		}
+	case "system/turn_duration":
+		// Written when a turn finishes; it is not a conversation end.
+		r.Kind = "lifecycle_observation"
+		r.Body.State = "idle"
 	case "ai-title":
 		s := str(n, "aiTitle")
 		if s == "" {
@@ -146,10 +150,16 @@ func normalizeCodex(n object, r *sessionrecord.Record) {
 	switch r.NativeKind {
 	case "session_meta":
 		// Metadata proves identity and cwd, not a live session-start observation.
+		// A distinct session_id is the parent thread of a compaction-resume file.
 		r.Extensions = map[string]json.RawMessage{}
 		for _, k := range []string{"cwd", "originator", "source"} {
 			if v, ok := p[k]; ok {
 				r.Extensions["native_"+k] = v
+			}
+		}
+		if parent := str(p, "session_id"); parent != "" && parent != str(p, "id") {
+			if v, err := json.Marshal(parent); err == nil {
+				r.Extensions["native_parent"] = v
 			}
 		}
 	case "response_item":
@@ -157,6 +167,10 @@ func normalizeCodex(n object, r *sessionrecord.Record) {
 		r.NativeKind += "/" + t
 		r.Role, r.Channel = textPtr(str(p, "role")), textPtr(str(p, "channel"))
 		switch t {
+		case "compaction":
+			// Compaction payloads are encrypted; the marker keeps the event
+			// visible without pretending its content was captured.
+			r.Kind = "compaction_marker"
 		case "message":
 			r.Kind, r.Body = "message", content(p["content"])
 			if r.Body.Text == "" && len(r.Body.Parts) == 0 {

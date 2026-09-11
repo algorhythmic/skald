@@ -56,7 +56,8 @@ assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
 db.executescript((ROOT / "internal/archive/migrations/002_daemon.sql").read_text())
 db.executescript((ROOT / "internal/archive/migrations/003_titles.sql").read_text())
 db.executescript((ROOT / "internal/archive/migrations/004_activity.sql").read_text())
-assert db.execute("PRAGMA user_version").fetchone() == (4,)
+db.executescript((ROOT / "internal/archive/migrations/005_continuation.sql").read_text())
+assert db.execute("PRAGMA user_version").fetchone() == (5,)
 columns = [row[1] for row in db.execute("PRAGMA table_info(session_titles)")]
 assert "origin" in columns
 columns = [row[1] for row in db.execute("PRAGMA table_info(session_activity)")]

@@ -269,7 +269,7 @@ func verifyRelocation(ctx context.Context, r archive.Registration, cp sessioncap
 }
 func discoveryError(err error) string {
 	switch err.Error() {
-	case "discovery_root_unavailable", "discovery_entry_unavailable", "discovery_limit_exceeded", "source_unavailable", "regular_source_required", "identity_probe_limit", "subagent_identity_unsupported", "conversation_identity_mismatch", "source_replaced_during_read", "conversation_identity_unavailable", "identity_metadata_too_large":
+	case "discovery_root_unavailable", "discovery_entry_unavailable", "discovery_limit_exceeded", "source_unavailable", "regular_source_required", "identity_probe_limit", "subagent_identity_unsupported", "conversation_identity_mismatch", "source_replaced_during_read", "conversation_identity_unavailable", "identity_metadata_too_large", "empty_session_store":
 		return err.Error()
 	}
 	return "discovery_failed"

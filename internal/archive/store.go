@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 const MaxResponseBytes = 32 << 20
 
 var ErrCapacity = errors.New("capture_capacity_limit")
@@ -210,8 +210,21 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		if _, err := s.db.Exec(string(b)); err != nil {
 			return nil, err
 		}
+		version = 4
 	}
-	if err := s.db.QueryRow("SELECT archive_instance FROM archive_meta WHERE singleton=1 AND schema_version=4 AND contract_version=1").Scan(&s.instance); err != nil {
+	if version == 4 {
+		if existing == 4 {
+			// Never mutate an older archive before a consistent recovery copy exists.
+			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-5-"+NewID()+".sqlite")); err != nil {
+				return nil, err
+			}
+		}
+		b, _ := migrations.ReadFile("migrations/005_continuation.sql")
+		if _, err := s.db.Exec(string(b)); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.db.QueryRow("SELECT archive_instance FROM archive_meta WHERE singleton=1 AND schema_version=5 AND contract_version=1").Scan(&s.instance); err != nil {
 		return nil, errors.New("invalid_archive_metadata")
 	}
 	if err := s.reprojectTitles(context.Background()); err != nil {
