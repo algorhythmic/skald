@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -336,7 +337,13 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 		}
 		var fp string
 		if raw, ok := rec.Extensions["native_file_path"]; ok && json.Unmarshal(raw, &fp) == nil && fp != "" {
-			if err := commonProjectDir(ctx, tx, *rec.ConversationKey, fp, rec); err != nil {
+			if err := commonProjectDir(ctx, tx, *rec.ConversationKey, filepath.Dir(fp), rec); err != nil {
+				return err
+			}
+		}
+		var nd string
+		if raw, ok := rec.Extensions["native_dir"]; ok && json.Unmarshal(raw, &nd) == nil && nd != "" {
+			if err := commonProjectDir(ctx, tx, *rec.ConversationKey, nd, rec); err != nil {
 				return err
 			}
 		}
@@ -489,44 +496,36 @@ func continuationTitle(ctx context.Context, tx *sql.Tx, conv, namespace, parentI
 	return err
 }
 
-// commonProjectDir maintains a file-evidence project per conversation: one
-// row holding the longest common directory prefix of native file paths seen
-// in tool inputs. Explicit native_cwd rows are unaffected.
-func commonProjectDir(ctx context.Context, tx *sql.Tx, conv, path string, rec sessionrecord.Record) error {
-	dir := strings.TrimSuffix(path, "/")
-	dir = filepath.Dir(dir)
+// commonProjectDir records a file-evidence project per conversation: the
+// nearest ancestor directory containing .git, falling back to the touched
+// directory itself. Each distinct root gets a bounded row, so sessions that
+// genuinely span projects appear under each. Explicit native_cwd rows are
+// unaffected.
+func commonProjectDir(ctx context.Context, tx *sql.Tx, conv, dir string, rec sessionrecord.Record) error {
+	dir = strings.TrimSuffix(dir, "/")
 	if !strings.HasPrefix(dir, "/") || len(dir) > 4096 {
 		return nil
 	}
-	var stored string
-	err := tx.QueryRowContext(ctx, "SELECT project FROM session_projects WHERE conversation_key=? LIMIT 1").Scan(&stored)
-	if err == sql.ErrNoRows {
-		_, err = tx.ExecContext(ctx, "INSERT INTO session_projects VALUES (?,?,?,?)", conv, dir, rec.RecordKey, rec.SourceRevision)
+	var n int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM session_projects WHERE conversation_key=?", conv).Scan(&n); err != nil {
 		return err
 	}
-	if err != nil {
-		return err
-	}
-	if dir == stored || strings.HasPrefix(dir, stored+"/") {
+	if n >= 8 {
 		return nil
 	}
-	prefix := commonDirPrefix(dir, stored)
-	if prefix == "" || prefix == "/" || len(strings.Split(strings.Trim(prefix, "/"), "/")) < 3 {
-		// Paths no longer share a plausible workspace root; keep the existing
-		// row rather than collapsing to an unhelpfully generic directory.
-		return nil
-	}
-	_, err = tx.ExecContext(ctx, "UPDATE session_projects SET project=?,record_key=?,source_revision=? WHERE conversation_key=? AND project=?", prefix, rec.RecordKey, rec.SourceRevision, conv, stored)
+	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, projectRoot(dir), rec.RecordKey, rec.SourceRevision)
 	return err
 }
 
-func commonDirPrefix(a, b string) string {
-	as, bs := strings.Split(a, "/"), strings.Split(b, "/")
-	n := 0
-	for n < len(as) && n < len(bs) && as[n] == bs[n] {
-		n++
+// projectRoot walks up to the nearest git working tree; outside one the
+// touched directory stands on its own.
+func projectRoot(dir string) string {
+	for d := dir; len(strings.Split(strings.Trim(d, "/"), "/")) >= 3; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
 	}
-	return strings.Join(as[:n], "/")
+	return dir
 }
 
 // derivedTitle projects the first substantive user message into a display
@@ -754,57 +753,63 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 		return err
 	}
 	rows.Close()
-	// File-evidence projects: the longest common directory prefix of native
-	// file paths, for conversations with no explicit project evidence.
+	// File-evidence projects: the nearest git working tree of each native
+	// file path, for conversations with no explicit project evidence.
 	rows, err = tx.QueryContext(ctx, `SELECT a.conversation_key,n.record_key,n.source_revision,
- coalesce(json_extract(c.original_bytes,'$.payload.content.rawInput.file_path'),
-  json_extract(c.original_bytes,'$.payload.content.rawInput.path'),'')
+ coalesce(json_extract(c.original_bytes,'$.payload.content.rawInput.file_path'),''),
+ coalesce(json_extract(c.original_bytes,'$.payload.content.rawInput.path'),''),
+ coalesce(json_extract(c.original_bytes,'$.payload.content.rawInput.workdir'),'')
  `+position+` JOIN content_objects c ON c.digest=n.source_revision
  JOIN streams st ON st.stream_key=o.stream_key JOIN sources src ON src.namespace=st.namespace
  WHERE src.provider='devin' AND json_extract(n.envelope_json,'$.native_kind')='tool_call'
- AND a.conversation_key NOT IN (SELECT conversation_key FROM session_projects)
  ORDER BY a.conversation_key`)
 	if err != nil {
 		return err
 	}
 	type pathPick struct {
 		key, revision string
-		prefix        string
 	}
-	projects := map[string]pathPick{}
+	projects := map[string]map[string]pathPick{}
 	for rows.Next() {
-		var conv, key, revision, path string
-		if err := rows.Scan(&conv, &key, &revision, &path); err != nil {
+		var conv, key, revision, fp, dp, wd string
+		if err := rows.Scan(&conv, &key, &revision, &fp, &dp, &wd); err != nil {
 			rows.Close()
 			return err
 		}
-		dir := filepath.Dir(strings.TrimSuffix(path, "/"))
-		if !strings.HasPrefix(dir, "/") || len(dir) > 4096 {
-			continue
+		dirs := []string{}
+		if fp != "" {
+			dirs = append(dirs, filepath.Dir(strings.TrimSuffix(fp, "/")))
 		}
-		p := projects[conv]
-		if p.key == "" {
-			projects[conv] = pathPick{key: key, revision: revision, prefix: dir}
-			continue
+		if dp != "" {
+			dirs = append(dirs, strings.TrimSuffix(dp, "/"))
 		}
-		if dir == p.prefix || strings.HasPrefix(dir, p.prefix+"/") {
-			continue
+		if wd != "" {
+			dirs = append(dirs, strings.TrimSuffix(wd, "/"))
 		}
-		p.prefix = commonDirPrefix(dir, p.prefix)
-		p.key, p.revision = key, revision
-		projects[conv] = p
+		set := projects[conv]
+		if set == nil {
+			set = map[string]pathPick{}
+			projects[conv] = set
+		}
+		for _, dir := range dirs {
+			if !strings.HasPrefix(dir, "/") || len(dir) > 4096 {
+				continue
+			}
+			if len(set) < 8 {
+				set[projectRoot(dir)] = pathPick{key: key, revision: revision}
+			}
+		}
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return err
 	}
 	rows.Close()
-	for conv, p := range projects {
-		if len(strings.Split(strings.Trim(p.prefix, "/"), "/")) < 3 {
-			continue
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, p.prefix, p.key, p.revision); err != nil {
-			return err
+	for conv, set := range projects {
+		for root, p := range set {
+			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, root, p.key, p.revision); err != nil {
+				return err
+			}
 		}
 	}
 	// Activity projections: newest observed position plus the latest signal per

@@ -54,10 +54,26 @@ func (r Remote) Snapshot(ctx context.Context, cursor string) (Snapshot, error) {
 	if err := r.Client.Do(ctx, "GET", "/v1/status", q, &out.Status); err != nil {
 		return out, err
 	}
-	q.Set("limit", "100")
-	q.Set("cursor", cursor)
-	err := r.Client.Do(ctx, "GET", "/v1/sessions", q, &out.Sessions)
-	return out, err
+	// Walk every session page so grouping sees the whole archive, not just the
+	// first hundred conversation keys. The page size stays the API bound.
+	out.Sessions.Items = []archive.Session{}
+	for pages := 0; pages < 20; pages++ {
+		var page archive.Page[archive.Session]
+		pq := r.query()
+		pq.Set("limit", "100")
+		pq.Set("cursor", cursor)
+		if err := r.Client.Do(ctx, "GET", "/v1/sessions", pq, &page); err != nil {
+			return out, err
+		}
+		out.Sessions.Items = append(out.Sessions.Items, page.Items...)
+		out.Sessions.Boundary = page.Boundary
+		out.Sessions.Next = page.Next
+		if page.Next == "" {
+			break
+		}
+		cursor = page.Next
+	}
+	return out, nil
 }
 func (r Remote) Transcript(ctx context.Context, key, cursor string, history bool) (archive.Page[archive.TranscriptEntry], error) {
 	var out archive.Page[archive.TranscriptEntry]

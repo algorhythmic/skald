@@ -146,6 +146,11 @@ func normalizeDevin(n object, r *sessionrecord.Record) {
 				r.Body.Text = t
 			}
 		}
+		if r.Kind == "opaque_record" {
+			// A title-less store still carries session metadata; a note keeps
+			// the transcript readable instead of an unexplained opaque row.
+			r.Kind, r.Body.Text = "native_note", "session store metadata"
+		}
 	case "agent_message":
 		if text := acpText(payload); text != "" {
 			r.Kind = "message"
@@ -178,12 +183,13 @@ func normalizeDevin(n object, r *sessionrecord.Record) {
 				v, _ := json.Marshal(wd)
 				exts["native_cwd"] = v
 			}
-			for _, k := range []string{"file_path", "path"} {
-				if fp := str(input, k); strings.HasPrefix(fp, "/") && len(fp) <= 4096 {
-					v, _ := json.Marshal(fp)
-					exts["native_file_path"] = v
-					break
-				}
+			if fp := str(input, "file_path"); strings.HasPrefix(fp, "/") && len(fp) <= 4096 {
+				v, _ := json.Marshal(fp)
+				exts["native_file_path"] = v
+			} else if dp := str(input, "path"); strings.HasPrefix(dp, "/") && len(dp) <= 4096 {
+				// `path` names a directory for list/search tools.
+				v, _ := json.Marshal(dp)
+				exts["native_dir"] = v
 			}
 			if len(exts) > 0 {
 				r.Extensions = exts
