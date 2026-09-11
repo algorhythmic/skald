@@ -36,6 +36,7 @@ type Session struct {
 	NativeID               string             `json:"native_id"`
 	Title                  string             `json:"title"`
 	TitleRef               *sessionrecord.Ref `json:"title_ref,omitempty"`
+	TitleKind              string             `json:"title_kind,omitempty"`
 	TitleOrderingAmbiguous bool               `json:"title_ordering_ambiguous"`
 	RecordVersions         int64              `json:"record_versions"`
 	SourceHealth           string             `json:"source_health"`
@@ -114,7 +115,7 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
 	in, args := scopeSQL(ns)
 	args = append(args, c.After, limit+1)
 	rows, err := s.db.QueryContext(ctx, `SELECT s.conversation_key,s.namespace,src.provider,s.native_id,
- coalesce(title.title,s.native_id),coalesce(title.record_key,''),coalesce(title.source_revision,''),coalesce(title.ordering_ambiguous,0),
+ coalesce(title.title,s.native_id),coalesce(title.record_key,''),coalesce(title.source_revision,''),coalesce(title.origin,''),coalesce(title.ordering_ambiguous,0),
  (SELECT count(*) FROM artifact_versions v JOIN artifacts a USING(record_key) WHERE a.conversation_key=s.conversation_key),
  CASE WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='available') THEN 'available'
  WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health NOT IN ('unavailable','unknown')) THEN 'partial'
@@ -129,7 +130,7 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
 	for rows.Next() {
 		var item Session
 		var titleKey, titleRevision string
-		if err := rows.Scan(&item.Key, &item.Namespace, &item.Provider, &item.NativeID, &item.Title, &titleKey, &titleRevision, &item.TitleOrderingAmbiguous, &item.RecordVersions, &item.SourceHealth); err != nil {
+		if err := rows.Scan(&item.Key, &item.Namespace, &item.Provider, &item.NativeID, &item.Title, &titleKey, &titleRevision, &item.TitleKind, &item.TitleOrderingAmbiguous, &item.RecordVersions, &item.SourceHealth); err != nil {
 			return result, err
 		}
 		if titleKey != "" {

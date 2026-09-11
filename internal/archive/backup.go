@@ -189,7 +189,7 @@ func Restore(ctx context.Context, backup, destination string, options Options) (
 	if err != nil {
 		return err
 	}
-	if err := verifyFile(ctx, backup, true); err != nil {
+	if err := verifyFile(ctx, backup, false); err != nil {
 		return err
 	}
 	if err := os.Mkdir(destination, 0700); err != nil {
@@ -209,9 +209,10 @@ func Restore(ctx context.Context, backup, destination string, options Options) (
 	if err != nil {
 		return err
 	}
-	if err := verifyFile(ctx, path, true); err != nil {
+	if err := verifyFile(ctx, path, false); err != nil {
 		return err
 	}
+	// Open upgrades older backup schemas and keeps a consistent recovery copy.
 	s, err := Open(destination, options)
 	if err != nil {
 		return err

@@ -51,4 +51,13 @@ assert db.execute("SELECT count(*) FROM changes").fetchone() == (0,)
 refuses("UPDATE ingest_checkpoints SET parsed_offset = 99")
 assert not db.execute("PRAGMA foreign_key_check").fetchall()
 assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
-print(f"SQLite {sqlite3.sqlite_version}: capture DDL, identity/scope constraints, immutable versions, normalization history, and atomic checkpoint rollback pass")
+
+# The daemon migrations must apply cleanly on standalone SQLite as well.
+db.executescript((ROOT / "internal/archive/migrations/002_daemon.sql").read_text())
+db.executescript((ROOT / "internal/archive/migrations/003_titles.sql").read_text())
+assert db.execute("PRAGMA user_version").fetchone() == (3,)
+columns = [row[1] for row in db.execute("PRAGMA table_info(session_titles)")]
+assert "origin" in columns
+refuses("INSERT INTO session_titles VALUES ('session','first-occurrence',?, 'v1','t','stream',0,0,0,'invented')", (digest,))
+assert not db.execute("PRAGMA foreign_key_check").fetchall()
+print(f"SQLite {sqlite3.sqlite_version}: capture DDL, identity/scope constraints, immutable versions, normalization history, atomic checkpoint rollback, and daemon migrations pass")

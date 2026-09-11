@@ -103,7 +103,10 @@ immutable source/normalization versions and same-database original bytes.
 Separate record observations preserve later generation/order evidence without
 rewriting a normalization's first envelope or source bytes. The schema-2 daemon
 migration adds locators, record heads, native-title projections, generation epochs and
-project observations. A sole-writer service now commits capture batches, serves
+project observations. The schema-3 migration labels each projected title `native`
+or `derived`; a derived title is the first line of the earliest substantive user
+message, keeps record provenance, and yields to any later native title.
+A sole-writer service now commits capture batches, serves
 reads and creates/restores consistent backups. Later group/surface/description/
 index tables belong to their owning milestones. Suppression tombstones already
 block reingestion; a user-facing deletion service remains pending.

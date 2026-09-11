@@ -27,7 +27,7 @@ Source connection:
                 [--namespace ID] [--since RFC3339|all] [--max-sessions 64]
 
 Archive commands:
-  skald tui [--socket PATH] [--namespace ID] [--theme desktop|amber]
+  skald tui [--socket PATH] [--namespace ID] [--theme heimdall|desktop|amber]
   skald serve [--config FILE] [--data-dir DIRECTORY] [--socket PATH]
   skald status [--socket PATH] [--namespace ID]
   skald sessions [--socket PATH] [--namespace ID] [--limit 25] [--cursor CURSOR]
@@ -71,7 +71,7 @@ func run(args []string, out, stderr io.Writer) error {
 		if len(args) != 1 {
 			return errors.New("unexpected_arguments")
 		}
-		_, err := fmt.Fprintln(out, "skald 0.1.0-dev · sessionrecord v1 · archive schema 2")
+		_, err := fmt.Fprintln(out, "skald 0.1.0-dev · sessionrecord v1 · archive schema 3")
 		return err
 	}
 	if args[0] == "sources" || args[0] == "connect" {

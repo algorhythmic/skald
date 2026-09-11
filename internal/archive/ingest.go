@@ -290,15 +290,31 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 				if len(text) > 240 {
 					text = text[:240]
 				}
-				if _, err := tx.ExecContext(ctx, `INSERT INTO session_titles VALUES (?,?,?,?,?,?,?,?,0)
+				if _, err := tx.ExecContext(ctx, `INSERT INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,ordering_ambiguous,origin)
+ VALUES (?,?,?,?,?,?,?,?,0,'native')
  ON CONFLICT(conversation_key) DO UPDATE SET
  record_key=excluded.record_key,source_revision=excluded.source_revision,adapter_version=excluded.adapter_version,
- title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal
- WHERE session_titles.stream_key=excluded.stream_key AND (excluded.epoch>session_titles.epoch OR
- (excluded.epoch=session_titles.epoch AND excluded.ordinal>=session_titles.ordinal))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, string(text), r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
+ title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal,origin='native'
+ WHERE session_titles.origin='derived' OR (session_titles.stream_key=excluded.stream_key AND (excluded.epoch>session_titles.epoch OR
+ (excluded.epoch=session_titles.epoch AND excluded.ordinal>=session_titles.ordinal)))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, string(text), r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
 					return err
 				}
 				if _, err := tx.ExecContext(ctx, "UPDATE session_titles SET ordering_ambiguous=1 WHERE conversation_key=? AND stream_key!=?", *rec.ConversationKey, r.Key()); err != nil {
+					return err
+				}
+			} else if title, ok := derivedTitle(rec); ok {
+				// Earliest eligible evidence wins within a stream; a native title
+				// record always replaces a derived projection.
+				if _, err := tx.ExecContext(ctx, `INSERT INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,ordering_ambiguous,origin)
+ VALUES (?,?,?,?,?,?,?,?,0,'derived')
+ ON CONFLICT(conversation_key) DO UPDATE SET
+ record_key=excluded.record_key,source_revision=excluded.source_revision,adapter_version=excluded.adapter_version,
+ title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal
+ WHERE session_titles.origin='derived' AND session_titles.stream_key=excluded.stream_key AND (excluded.epoch<session_titles.epoch OR
+ (excluded.epoch=session_titles.epoch AND excluded.ordinal<session_titles.ordinal))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, title, r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
+					return err
+				}
+				if _, err := tx.ExecContext(ctx, "UPDATE session_titles SET ordering_ambiguous=1 WHERE conversation_key=? AND stream_key!=? AND origin='derived'", *rec.ConversationKey, r.Key()); err != nil {
 					return err
 				}
 			}
@@ -348,6 +364,177 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 		return err
 	}
 	return capacityError(tx.Commit())
+}
+
+// derivedTitle projects the first substantive user message into a display
+// title for conversations whose provider never writes a native title record.
+// Injected context blocks and history/caveat preambles are not eligible; the
+// projection is labeled origin='derived' and keeps its record provenance.
+func derivedTitle(rec sessionrecord.Record) (string, bool) {
+	if rec.Kind != "message" || rec.Role == nil || *rec.Role != "user" {
+		return "", false
+	}
+	text := strings.TrimSpace(rec.Body.Text)
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		text = strings.TrimSpace(text[:i])
+	}
+	if text == "" || strings.HasPrefix(text, "<") ||
+		strings.HasPrefix(text, "The following is the Codex agent history") ||
+		strings.HasPrefix(text, "Caveat: The messages below") {
+		return "", false
+	}
+	runes := []rune(text)
+	if len(runes) > 240 {
+		runes = runes[:240]
+	}
+	return string(runes), true
+}
+
+// reprojectTitles backfills title rows for sessions captured before the
+// projection existed. It runs at every Open and only visits conversations
+// without any title row, so it is a no-op once projections are complete.
+// Pass 1 recovers native titles from opaque ai-title records whose text lives
+// in the retained original bytes; pass 2 derives titles from user messages.
+func (s *Store) reprojectTitles(ctx context.Context) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	type pick struct {
+		recordKey, revision, adapter, stream, title string
+		epoch, ordinal                              int64
+		streams                                     map[string]bool
+	}
+	// Conversations without a native title are eligible: absent rows are
+	// inserted, derived projections are upgraded in place.
+	eligible := ` LEFT JOIN session_titles t ON t.conversation_key=a.conversation_key`
+	position := `FROM normalizations n
+ JOIN artifacts a USING(record_key)
+ JOIN record_observations o ON o.record_key=n.record_key AND o.source_revision=n.source_revision
+ JOIN stream_generations g ON g.stream_key=o.stream_key AND g.generation=o.generation`
+	// Latest ai-title evidence wins within a conversation, matching ingest order.
+	rows, err := tx.QueryContext(ctx, `SELECT a.conversation_key,n.record_key,n.source_revision,n.adapter_version,
+ o.stream_key,g.epoch,o.ordinal,c.original_bytes
+ `+position+eligible+` JOIN content_objects c ON c.digest=n.source_revision
+ WHERE n.kind='opaque_record' AND json_extract(n.envelope_json,'$.native_kind')='ai-title'
+ AND (t.origin IS NULL OR t.origin='derived')
+ ORDER BY a.conversation_key,g.epoch DESC,o.ordinal DESC,o.stream_key`)
+	if err != nil {
+		return err
+	}
+	native := map[string]*pick{}
+	for rows.Next() {
+		var conv, key, revision, adapter, stream string
+		var epoch, ordinal int64
+		var raw []byte
+		if err := rows.Scan(&conv, &key, &revision, &adapter, &stream, &epoch, &ordinal, &raw); err != nil {
+			rows.Close()
+			return err
+		}
+		var line struct {
+			AiTitle string `json:"aiTitle"`
+			Title   string `json:"title"`
+		}
+		if json.Unmarshal(raw, &line) != nil {
+			continue
+		}
+		title := line.AiTitle
+		if title == "" {
+			title = line.Title
+		}
+		if title == "" {
+			continue
+		}
+		if runes := []rune(title); len(runes) > 240 {
+			title = string(runes[:240])
+		}
+		p := native[conv]
+		if p == nil {
+			p = &pick{streams: map[string]bool{}}
+			native[conv] = p
+		}
+		p.streams[stream] = true
+		if p.recordKey == "" {
+			p.recordKey, p.revision, p.adapter = key, revision, adapter
+			p.stream, p.epoch, p.ordinal, p.title = stream, epoch, ordinal, title
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for conv, p := range native {
+		ambiguous := 0
+		if len(p.streams) > 1 {
+			ambiguous = 1
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,ordering_ambiguous,origin)
+ VALUES (?,?,?,?,?,?,?,?,?,'native')
+ ON CONFLICT(conversation_key) DO UPDATE SET
+ record_key=excluded.record_key,source_revision=excluded.source_revision,adapter_version=excluded.adapter_version,
+ title=excluded.title,stream_key=excluded.stream_key,epoch=excluded.epoch,ordinal=excluded.ordinal,
+ ordering_ambiguous=excluded.ordering_ambiguous,origin='native'
+ WHERE session_titles.origin='derived'`, conv, p.recordKey, p.revision, p.adapter, p.title, p.stream, p.epoch, p.ordinal, ambiguous); err != nil {
+			return err
+		}
+	}
+	rows, err = tx.QueryContext(ctx, `SELECT a.conversation_key,n.record_key,n.source_revision,n.adapter_version,
+ o.stream_key,g.epoch,o.ordinal,n.envelope_json
+ `+position+`
+ WHERE n.kind='message'
+ AND a.conversation_key NOT IN (SELECT conversation_key FROM session_titles)
+ ORDER BY a.conversation_key,g.epoch,o.ordinal,o.stream_key`)
+	if err != nil {
+		return err
+	}
+	derived := map[string]*pick{}
+	for rows.Next() {
+		var conv, key, revision, adapter, stream, envelope string
+		var epoch, ordinal int64
+		if err := rows.Scan(&conv, &key, &revision, &adapter, &stream, &epoch, &ordinal, &envelope); err != nil {
+			rows.Close()
+			return err
+		}
+		p := derived[conv]
+		if p == nil {
+			p = &pick{streams: map[string]bool{}}
+			derived[conv] = p
+		}
+		rec, err := sessionrecord.Decode([]byte(envelope))
+		if err != nil {
+			continue
+		}
+		title, ok := derivedTitle(rec)
+		if !ok {
+			continue
+		}
+		p.streams[stream] = true
+		if p.recordKey == "" {
+			p.recordKey, p.revision, p.adapter = key, revision, adapter
+			p.stream, p.epoch, p.ordinal, p.title = stream, epoch, ordinal, title
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for conv, p := range derived {
+		if p.recordKey == "" {
+			continue
+		}
+		ambiguous := 0
+		if len(p.streams) > 1 {
+			ambiguous = 1
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,ordering_ambiguous,origin)
+ VALUES (?,?,?,?,?,?,?,?,?,'derived')`, conv, p.recordKey, p.revision, p.adapter, p.title, p.stream, p.epoch, p.ordinal, ambiguous); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func capacityError(err error) error {

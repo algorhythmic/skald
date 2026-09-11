@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,5 +337,134 @@ func TestNativeTitleProjectionUsesSourceOrderAndLabelsAmbiguity(t *testing.T) {
 	}
 	if page.Items[0].Title != "Later native title" || !page.Items[0].TitleOrderingAmbiguous {
 		t.Fatal("cross-stream title order was invented")
+	}
+	if page.Items[0].TitleKind != "native" {
+		t.Fatal("native title origin not reported", page.Items[0].TitleKind)
+	}
+}
+
+func codexStore(t *testing.T) (*Store, Registration, []byte) {
+	t.Helper()
+	opts := DefaultOptions()
+	opts.MinFreeBytes = 0
+	s, err := Open(filepath.Join(t.TempDir(), "data"), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	r := Registration{Source: sessioncapture.Source{Namespace: "fixture:codex", Provider: sessioncapture.Codex, StreamID: "fixture"}, Root: t.TempDir(), Path: "session.jsonl"}
+	if err := s.Register(context.Background(), []Registration{r}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile("../../testdata/codex/session.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, r, b
+}
+
+func TestDerivedTitleProjectionAndReprojection(t *testing.T) {
+	ctx := context.Background()
+	s, r, raw := codexStore(t)
+	batch := testBatch(t, raw, r, sessioncapture.Checkpoint{})
+	mustIngest(t, s, r, sessioncapture.Checkpoint{}, batch)
+	page, err := s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal(err)
+	}
+	if page.Items[0].Title != "Show the bounded retrieval contract." || page.Items[0].TitleKind != "derived" || page.Items[0].TitleRef == nil {
+		t.Fatal("derived title projection missing or unattributable", page.Items[0].Title, page.Items[0].TitleKind)
+	}
+	// Context-injection user messages are not eligible, and the earliest
+	// substantive message keeps the projection stable.
+	lines := []string{
+		`{"type":"session_meta","payload":{"id":"derived-fixture","timestamp":"2026-09-10T00:00:00Z","cwd":"/p","originator":"codex_exec","cli_version":"0.153.4"}}`,
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\n<cwd>/p</cwd>\n</environment_context>"}]},"timestamp":"2026-09-10T00:00:01Z"}`,
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"First line of the real task\nwith a second line"}]},"timestamp":"2026-09-10T00:00:02Z"}`,
+		`{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"A later user turn"}]},"timestamp":"2026-09-10T00:00:03Z"}`,
+	}
+	second := r
+	second.StreamID = "second"
+	second.Path = "second.jsonl"
+	if err := s.Register(ctx, []Registration{second}); err != nil {
+		t.Fatal(err)
+	}
+	b2 := testBatch(t, []byte(strings.Join(lines, "\n")+"\n"), second, sessioncapture.Checkpoint{})
+	mustIngest(t, s, second, sessioncapture.Checkpoint{}, b2)
+	page, err = s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil || len(page.Items) != 2 {
+		t.Fatal(err)
+	}
+	var derived Session
+	for _, item := range page.Items {
+		if item.NativeID == "derived-fixture" {
+			derived = item
+		}
+	}
+	if derived.Title != "First line of the real task" || derived.TitleKind != "derived" {
+		t.Fatal("injected context used as title or later turn replaced earliest", derived.Title)
+	}
+	// Sessions captured before the projection existed gain it on reopen.
+	if _, err := s.db.Exec("DELETE FROM session_titles"); err != nil {
+		t.Fatal(err)
+	}
+	dir := s.dir
+	s.Close()
+	reopened, err := Open(dir, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	page, err = reopened.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range page.Items {
+		if item.TitleKind != "derived" || item.TitleRef == nil {
+			t.Fatal("reopen did not reproject derived titles", item.Title, item.TitleKind)
+		}
+	}
+}
+
+func TestSchemaTwoUpgradeHasRecoveryCopy(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data")
+	if err := privateDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "archive.sqlite")
+	if err := regularPrivate(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", DSN(path, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"migrations/001_capture.sql", "migrations/002_daemon.sql"} {
+		ddl, _ := migrations.ReadFile(name)
+		if _, err := db.Exec(string(ddl)); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	if _, err := db.Exec("INSERT INTO archive_meta VALUES (1,2,'pre-upgrade-instance',1,NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(dir, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-3-*.sqlite"))
+	if err != nil || len(backups) != 1 {
+		t.Fatal("schema-3 migration has no recovery copy", err)
+	}
+	old, err := sql.Open("sqlite", DSN(backups[0], true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	var version int
+	if err := old.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
+		t.Fatal("backup is not pre-upgrade schema", err)
 	}
 }

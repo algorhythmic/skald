@@ -16,7 +16,7 @@ history through the socket API. Retrieval and peer integrations remain future wo
 - Unchanged complete files use device/inode/size/mtime/ctime checks between periodic
   full-prefix audits. Changes, restarts and backfills retain prefix verification.
 
-- Native `skald tui` with terminal-theme/amber/monochrome display, project/provider/source grouping,
+- Native `skald tui` with heimdall/terminal-theme/amber/monochrome display, project/provider/source grouping,
   session filtering, expanded recent context, transcript pages, tool folding, native
   recap/turn navigation, historical revisions, exact references, terminal clipboard,
   source diagnostics and scrollable help. [TUI guide](docs/TUI.md).
@@ -35,7 +35,12 @@ history through the socket API. Retrieval and peer integrations remain future wo
 - Transactional source registration with pinned namespace/provider/logical stream
   identities and explicit root aliases. Configured paths stay inside their source
   roots; devices, pipes and escaping symlinks are refused.
-- SQLite schema 2 with original bytes, immutable source and normalization versions,
+- Session titles use native `ai-title` records (the real `aiTitle` field) when a
+  provider emits them, otherwise a bounded projection of the first line of the
+  earliest substantive user message — labeled `title_kind` with record provenance
+  and backfilled for previously archived conversations. Injected context blocks
+  are not eligible; a later native title replaces the derived one.
+- SQLite schema 3 with original bytes, immutable source and normalization versions,
   separate source-order observations/generation epochs, checkpoint/change commits,
   capture gaps, source health, record heads and project observations. Native titles
   have bounded attributable projections; ambiguous cross-stream ordering is labeled.
@@ -49,7 +54,7 @@ history through the socket API. Retrieval and peer integrations remain future wo
   artifact references; exact revision/adapter reads; separately enabled raw bytes;
   terminal control escaping; bounded request and response sizes.
 - SQLite online backups, original-object digest/foreign-key/integrity checks,
-  atomic no-replace publication and restore with a new archive instance. Schema-1
+  atomic no-replace publication and restore with a new archive instance. Older-schema
   upgrades retain a consistent pre-upgrade backup. No live WAL file copying.
 
 See [archive setup](docs/ARCHIVE-SETUP.md) for commands and the explicit source

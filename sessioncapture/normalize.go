@@ -117,7 +117,11 @@ func normalizeClaude(n object, r *sessionrecord.Record) {
 			r.Role = textPtr("system")
 		}
 	case "ai-title":
-		if s := str(n, "title"); s != "" {
+		s := str(n, "aiTitle")
+		if s == "" {
+			s = str(n, "title")
+		}
+		if s != "" {
 			r.Kind = "title"
 			r.Body.Text = s
 		}
