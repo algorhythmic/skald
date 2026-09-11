@@ -21,6 +21,7 @@ type Collector struct {
 	lastDiscovery   time.Time
 	discoveryCursor map[string]int
 	verified        map[string]verifiedFile
+	devinWal        map[string]walTick
 	Store           *archive.Store
 	Config          Config
 	mu              sync.Mutex
@@ -82,7 +83,31 @@ func (c *Collector) Scan(ctx context.Context) bool {
 			continue
 		}
 		delete(c.verified, source.Key())
-		batch, err := captureFile(ctx, source, cp)
+		var batch sessioncapture.Batch
+		if source.Provider == sessioncapture.Devin {
+			if walAt, hot := sessioncapture.DevinWal(source.Root, source.Path); hot {
+				// The desktop app writes bookkeeping pages to every open
+				// session's WAL; only growing message content is activity.
+				if c.devinWal == nil {
+					c.devinWal = map[string]walTick{}
+				}
+				t := c.devinWal[source.Key()]
+				t.at = walAt
+				if count, maxPos, perr := sessioncapture.DevinActivity(ctx, source.Root, source.Path); perr == nil {
+					t.active = count != t.count || maxPos != t.maxPos
+					t.count, t.maxPos = count, maxPos
+				}
+				c.devinWal[source.Key()] = t
+				batch = sessioncapture.Batch{Records: []sessioncapture.Captured{}, Gaps: []sessioncapture.Gap{}, Checkpoint: cp, Pending: true, SourceActive: t.active, SourceActiveAt: walAt}
+			} else if t, ok := c.devinWal[source.Key()]; ok && t.active {
+				// Quiet again: a later bookkeeping touch must not read as a
+				// continuation of an earlier live streak.
+				c.devinWal[source.Key()] = walTick{count: t.count, maxPos: t.maxPos}
+			}
+		}
+		if !batch.Pending {
+			batch, err = captureFile(ctx, source, cp)
+		}
 		if err != nil {
 			code := "source_unavailable"
 			if errors.Is(err, context.Canceled) {
@@ -130,6 +155,12 @@ func (c *Collector) Scan(ctx context.Context) bool {
 	return more
 }
 
+type walTick struct {
+	at            time.Time
+	count, maxPos int
+	active        bool
+}
+
 type cancelReader struct {
 	f   *os.File
 	ctx context.Context
@@ -168,11 +199,8 @@ func captureFile(ctx context.Context, r archive.Registration, cp sessioncapture.
 	}
 	var input io.ReadSeeker = cancelReader{f, ctx}
 	if r.Provider == sessioncapture.Devin {
-		// The store rewrites committed rows while a session is active; defer
-		// until the WAL is quiet rather than churning generations per update.
-		if !sessioncapture.DevinQuiet(r.Root, r.Path) {
-			return sessioncapture.Batch{Records: []sessioncapture.Captured{}, Gaps: []sessioncapture.Gap{}, Checkpoint: cp, Pending: true}, nil
-		}
+		// The caller deferred while the WAL was hot; it is quiet now, so the
+		// canonical dump is a consistent snapshot.
 		dump, err := sessioncapture.DevinDump(ctx, r.Root, r.Path)
 		if err != nil {
 			return sessioncapture.Batch{}, err

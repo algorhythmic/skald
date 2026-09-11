@@ -47,7 +47,11 @@ history through the socket API. Retrieval and peer integrations remain future wo
   observed record position and time. Providers without lifecycle records
   (Claude, Devin) derive the signal from the newest record's shape — an open
   user tail or a tool call in flight is working evidence, a reply tail is idle
-  evidence. A consumed input request reads as working; cross-stream signal
+  evidence. While a Devin store's WAL is hot, capture defers and a read-only
+  probe watches the messages table — growing content projects a working
+  signal at the observed write time, since the desktop app also writes
+  bookkeeping pages to open-but-idle sessions. A consumed input request reads
+  as working; cross-stream signal
   ordering is labeled ambiguous. This is archived evidence, not live presence.
 - SQLite schema 4 with original bytes, immutable source and normalization versions,
   separate source-order observations/generation epochs, checkpoint/change commits,

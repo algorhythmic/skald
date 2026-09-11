@@ -30,9 +30,29 @@ const devinDumpLimit = 512 << 20
 // consistent snapshot. The desktop rewrites rows in place while a session is
 // active, so callers should gate on DevinQuiet first; a rewrite of already
 // captured rows between quiet snapshots surfaces as a continuity gap.
-func DevinQuiet(root, path string) bool {
+// DevinWal reports the WAL's mtime. The store is "hot" when the WAL was
+// touched within the last thirty seconds — capture defers while hot.
+func DevinWal(root, path string) (time.Time, bool) {
 	st, err := os.Stat(filepath.Join(root, path) + "-wal")
-	return err != nil || time.Since(st.ModTime()) >= 30*time.Second
+	if err != nil {
+		return time.Time{}, false
+	}
+	return st.ModTime(), time.Since(st.ModTime()) < 30*time.Second
+}
+
+// DevinActivity probes a hot store for conversation growth. The desktop app
+// writes bookkeeping pages to every open session's WAL, so file churn alone
+// is not session activity; only a changing message count or newest position
+// is. A read-only probe on a hot WAL may race a commit — it is a liveness
+// hint, never stored state.
+func DevinActivity(ctx context.Context, root, path string) (count, maxPos int, err error) {
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(root, path)+"?mode=ro")
+	if err != nil {
+		return 0, 0, err
+	}
+	defer db.Close()
+	err = db.QueryRowContext(ctx, "SELECT count(*), coalesce(max(position),0) FROM messages").Scan(&count, &maxPos)
+	return count, maxPos, err
 }
 
 func DevinDump(ctx context.Context, root, path string) ([]byte, error) {

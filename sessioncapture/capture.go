@@ -71,6 +71,11 @@ type Batch struct {
 	Pending    bool       `json:"pending_partial_line"`
 	More       bool       `json:"more"`
 	Blocked    bool       `json:"blocked"`
+	// SourceActive marks a live source the collector deliberately deferred —
+	// Devin's store rewrites rows while its WAL is hot. SourceActiveAt is the
+	// observed write time, projected as working evidence, not a record.
+	SourceActive   bool      `json:"source_active,omitempty"`
+	SourceActiveAt time.Time `json:"source_active_at,omitempty"`
 }
 
 func sourceKey(s Source) string {

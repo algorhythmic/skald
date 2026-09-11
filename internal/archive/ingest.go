@@ -348,6 +348,16 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 			}
 		}
 	}
+	if batch.SourceActive && !batch.SourceActiveAt.IsZero() && cp.ConversationID != "" {
+		// A hot source WAL is liveness evidence: the conversation is being
+		// written right now. Project working at the write time; a quiet
+		// snapshot or a stale timestamp replaces it with record evidence.
+		conv := sessionrecord.Conversation(r.Namespace, cp.ConversationID)
+		at := stamp(batch.SourceActiveAt)
+		if _, err := tx.ExecContext(ctx, `UPDATE session_activity SET signal='working',signal_time=?,seen_time=? WHERE conversation_key=?`, at, at, conv); err != nil {
+			return err
+		}
+	}
 	for _, gap := range batch.Gaps {
 		result, err := tx.ExecContext(ctx, "INSERT INTO capture_gaps VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", r.Key(), gap.Generation, gap.Offset, gap.Code, stamp(now))
 		if err != nil {
@@ -367,7 +377,7 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 		return err
 	}
 	health := "available"
-	if batch.Pending {
+	if batch.Pending && !batch.SourceActive {
 		health = "partial_line"
 	}
 	if batch.More {
@@ -510,22 +520,26 @@ func commonProjectDir(ctx context.Context, tx *sql.Tx, conv, dir string, rec ses
 	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM session_projects WHERE conversation_key=?", conv).Scan(&n); err != nil {
 		return err
 	}
-	if n >= 8 {
+	root := projectRoot(dir)
+	if root == "" || n >= 8 {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, projectRoot(dir), rec.RecordKey, rec.SourceRevision)
+	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, root, rec.RecordKey, rec.SourceRevision)
 	return err
 }
 
-// projectRoot walks up to the nearest git working tree; outside one the
-// touched directory stands on its own.
+// projectRoot walks up to the nearest git working tree. Paths outside one
+// (screenshots, scratch files, shared home directories) are not projects.
 func projectRoot(dir string) string {
-	for d := dir; len(strings.Split(strings.Trim(d, "/"), "/")) >= 3; d = filepath.Dir(d) {
+	if !strings.HasPrefix(dir, "/") || len(dir) > 4096 {
+		return ""
+	}
+	for d := dir; d != "/" && d != "."; d = filepath.Dir(d) {
 		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
 			return d
 		}
 	}
-	return dir
+	return ""
 }
 
 // derivedTitle projects the first substantive user message into a display
@@ -792,11 +806,12 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			projects[conv] = set
 		}
 		for _, dir := range dirs {
-			if !strings.HasPrefix(dir, "/") || len(dir) > 4096 {
+			root := projectRoot(dir)
+			if root == "" {
 				continue
 			}
 			if len(set) < 8 {
-				set[projectRoot(dir)] = pathPick{key: key, revision: revision}
+				set[root] = pathPick{key: key, revision: revision}
 			}
 		}
 	}
