@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -528,6 +529,87 @@ func TestClaudeDerivedActivitySignals(t *testing.T) {
 	}
 }
 
+func TestContinuationTitleFromParent(t *testing.T) {
+	ctx := context.Background()
+	opts := DefaultOptions()
+	opts.MinFreeBytes = 0
+	s, err := Open(filepath.Join(t.TempDir(), "data"), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	root := t.TempDir()
+	mk := func(stream string) Registration {
+		r := Registration{Source: sessioncapture.Source{Namespace: "fixture:codex", Provider: sessioncapture.Codex, StreamID: stream}, Root: root, Path: stream + ".jsonl"}
+		if err := s.Register(ctx, []Registration{r}); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	parent := mk("parent")
+	parentRaw := `{"type":"session_meta","payload":{"id":"parent-1","timestamp":"2026-09-10T00:00:00Z","cwd":"/p","originator":"codex_exec","cli_version":"0.153.4"}}
+{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue the archived work"}]},"timestamp":"2026-09-10T00:00:01Z"}
+{"type":"compacted","payload":{"message":""},"timestamp":"2026-09-10T00:00:02Z"}
+`
+	mustIngest(t, s, parent, sessioncapture.Checkpoint{}, testBatch(t, []byte(parentRaw), parent, sessioncapture.Checkpoint{}))
+	stub := mk("stub")
+	// A compaction-resume file carries session_meta naming the parent thread,
+	// an encrypted compaction blob and settings — no readable content.
+	stubRaw := `{"type":"session_meta","payload":{"id":"stub-1","session_id":"parent-1","timestamp":"2026-09-10T01:00:00Z","cwd":"/p","originator":"codex_exec","cli_version":"0.153.4"}}
+{"type":"response_item","payload":{"type":"compaction","encrypted_content":"AAAA"},"timestamp":"2026-09-10T01:00:01Z"}
+`
+	mustIngest(t, s, stub, sessioncapture.Checkpoint{}, testBatch(t, []byte(stubRaw), stub, sessioncapture.Checkpoint{}))
+	page, err := s.Sessions(ctx, []string{"fixture:codex"}, "", 25)
+	if err != nil || len(page.Items) != 2 {
+		t.Fatal(err, len(page.Items))
+	}
+	for _, item := range page.Items {
+		if item.NativeID == "stub-1" {
+			if item.Title != "Continuation of Continue the archived work" || item.TitleKind != "continuation" {
+				t.Fatal("compaction stub did not inherit the parent title", item.Title, item.TitleKind)
+			}
+		}
+	}
+}
+
+func TestDevinFilePathProjects(t *testing.T) {
+	ctx := context.Background()
+	opts := DefaultOptions()
+	opts.MinFreeBytes = 0
+	s, err := Open(filepath.Join(t.TempDir(), "data"), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	scratch := t.TempDir() // no .git: not a project
+	r := Registration{Source: sessioncapture.Source{Namespace: "fixture:devin", Provider: sessioncapture.Devin, StreamID: "s1", ConversationID: "devin-conv"}, Root: t.TempDir(), Path: "session.db"}
+	if err := s.Register(ctx, []Registration{r}); err != nil {
+		t.Fatal(err)
+	}
+	raw := fmt.Sprintf(`{"kind":"meta","payload":{"info":{"title":"Devin session"}}}
+{"kind":"tool_call","position":0,"payload":{"kind":"tool_call","content":{"toolCallId":"t0","rawInput":{"file_path":%q}}}}
+{"kind":"tool_call","position":1,"payload":{"kind":"tool_call","content":{"toolCallId":"t1","rawInput":{"path":%q}}}}
+{"kind":"tool_call","position":2,"payload":{"kind":"tool_call","content":{"toolCallId":"t2","rawInput":{"file_path":%q}}}}
+`, filepath.Join(repo, "internal", "x.go"), filepath.Join(repo, "docs"), filepath.Join(scratch, "shot.png"))
+	batch := testBatch(t, []byte(raw), r, sessioncapture.Checkpoint{})
+	mustIngest(t, s, r, sessioncapture.Checkpoint{}, batch)
+	page, err := s.Sessions(ctx, []string{r.Namespace}, "", 25)
+	if err != nil || len(page.Items) != 1 {
+		t.Fatal(err, len(page.Items))
+	}
+	got := map[string]bool{}
+	for _, p := range page.Items[0].Projects {
+		got[p.Path] = true
+	}
+	if len(got) != 1 || !got[repo] {
+		t.Fatal("expected the git working tree as the only project", page.Items[0].Projects)
+	}
+}
+
 func TestSchemaTwoUpgradeHasRecoveryCopy(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "data")
 	if err := privateDir(dir); err != nil {
@@ -568,5 +650,58 @@ func TestSchemaTwoUpgradeHasRecoveryCopy(t *testing.T) {
 	var version int
 	if err := old.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 2 {
 		t.Fatal("backup is not pre-upgrade schema", err)
+	}
+}
+
+func TestSchemaFourUpgradeAllowsContinuation(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data")
+	if err := privateDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "archive.sqlite")
+	if err := regularPrivate(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", DSN(path, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"migrations/001_capture.sql", "migrations/002_daemon.sql", "migrations/003_titles.sql", "migrations/004_activity.sql"} {
+		ddl, _ := migrations.ReadFile(name)
+		if _, err := db.Exec(string(ddl)); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	if _, err := db.Exec("INSERT INTO archive_meta VALUES (1,4,'pre-upgrade-instance',1,NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	s, err := Open(dir, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
+		t.Fatal("schema-5 migration did not apply", err, version)
+	}
+	// The v4 CHECK rejected 'continuation'; after the rebuild it must insert.
+	digest := "sha256:" + strings.Repeat("a", 64)
+	for _, q := range []string{
+		`INSERT INTO sources VALUES ('sr1:namespace:x','codex','test','{}','{}')`,
+		`INSERT INTO streams VALUES ('sr1:stream:x','sr1:namespace:x','s')`,
+		`INSERT INTO sessions VALUES ('sr1:conversation:x','sr1:namespace:x','x','available')`,
+		`INSERT INTO content_objects VALUES ('` + digest + `',2,'application/json',x'7b7d')`,
+		`INSERT INTO artifacts VALUES ('sr1:record:x','sr1:namespace:x','conversation','sr1:conversation:x','sr1:conversation:x')`,
+		`INSERT INTO artifact_versions VALUES ('sr1:record:x','` + digest + `','2026-09-10T00:00:00Z')`,
+		`INSERT INTO normalizations VALUES ('sr1:record:x','` + digest + `','test',1,'title',NULL,NULL,NULL,'{}')`,
+	} {
+		if _, err := s.db.Exec(q); err != nil {
+			t.Fatal(q, err)
+		}
+	}
+	if _, err := s.db.Exec(`INSERT INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,origin)
+ VALUES ('sr1:conversation:x','sr1:record:x','` + digest + `','test','Continuation of work','sr1:stream:x',0,0,'continuation')`); err != nil {
+		t.Fatal("continuation origin still rejected", err)
 	}
 }

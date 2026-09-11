@@ -31,17 +31,24 @@ remain under “no project.” Provider, source health and activity are separate
 | Key | Action |
 | --- | --- |
 | ↑/↓ or j/k | Select a conversation |
-| Space | Expand or collapse recent context |
-| Enter or 2 | Read the transcript |
+| Space | Expand recent context, or toggle a folded title cluster |
+| Enter or 2 | Read the transcript, or toggle a folded title cluster |
 | h | Open the transcript at a native recap on its current page |
-| g | Group by project, provider, source namespace or all conversations |
+| g | Group by project, provider, source root, recency, status or all conversations |
+| O | Order rows by recent activity, title or status |
+| x | Hide or show idle sessions |
 | / | Filter titles, native IDs, providers, sources and projects on the loaded page |
 | N / P | Next / previous session page |
 | Home / End, PgUp / PgDn | Move through the loaded session page |
 
-The list loads at most 100 sessions per page. Project associations are bounded at
-32 per session, with explicit truncation metadata. A filter applies to the current
-page; it is not a full archive search. Namespaces come from the daemon configuration.
+The overview loads every session page (up to twenty pages per refresh), so
+grouping and folding see the whole archive; the sessions API still bounds each
+page at 100 rows. Within a group, rows order by newest observed activity unless
+`O` selects title or status ordering, and project groups rank by live evidence
+first. Project associations are bounded at
+32 per session, with explicit truncation metadata. A filter applies to the loaded
+sessions; it is not a full archive search. Source groups label by configured root
+path; namespaces come from the daemon configuration.
 
 Expanded descriptions select a native recap or meaningful assistant text from the
 recent 25-record window. A newer assistant message becomes a labeled excerpt with
@@ -58,10 +65,13 @@ sessions — files that start from an encrypted compaction blob — inherit
 `Continuation of <parent title>` from the parent thread named in their
 `session_meta` when that parent is archived and titled; the metadata labels it
 `continued session`. Sessions with no eligible evidence show a shortened native
-ID, and sessions sharing an identical display title inside one group fold into
-a single `Title ×N` row; Enter expands the row to list the members (each
-suffixed with a short ID) and collapses it again. Untitled sessions share the
-`(untitled)` label, so stub sessions collapse the same way.
+ID, and sessions sharing a display title inside one group fold into a single
+`Title ×N ⊕` row; Enter or Space expands the row to list the members (each
+suffixed with a short ID) and collapses it again. Folding compares a shared
+title prefix, so generated titles that differ only in a trailing URL or counter
+still fold, and the header shows the longest common head rather than one
+member's distinct tail. Untitled sessions share the `(untitled)` label, so stub
+sessions collapse the same way.
 
 The circle before each session is archived activity evidence, not live presence:
 `●` a recent working signal, `◐` an unanswered input request, a stale working
@@ -76,7 +86,10 @@ summarizes anything. Ordering ambiguity across streams or rewrite epochs is labe
 source arrival time is never used to invent chronology. Unknown recap coverage
 stays unknown. Activity is archived evidence: lifecycle observations where
 providers emit them, newest-record shape where they do not — never live working
-state or completed conversations.
+state or completed conversations. The Devin desktop store adds one source-level
+signal: while a session's WAL is hot and its message count is still growing,
+the collector projects a working signal at the observed write time; it decays
+to stale on its own and never marks bookkeeping-only writes active.
 
 ## Transcript
 

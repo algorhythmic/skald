@@ -41,6 +41,29 @@ func devinFixture(t *testing.T, dir string) string {
 	return name
 }
 
+func TestDevinEmptyStoreRejected(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	name := "33333333-4444-5555-6666-777777777777.db"
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		"CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+		"CREATE TABLE messages (position INTEGER PRIMARY KEY, kind TEXT NOT NULL, payload TEXT NOT NULL)",
+		`INSERT INTO meta VALUES ('schema_version','1'),('info','{}'),('message_count','0')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	db.Close()
+	if _, err := sessioncapture.Identify(ctx, dir, name, sessioncapture.Devin); err == nil || err.Error() != "empty_session_store" {
+		t.Fatal("metadata-only store must not enroll", err)
+	}
+}
+
 func TestDevinDumpIdentifyAndNormalize(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
