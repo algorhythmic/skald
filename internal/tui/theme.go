@@ -74,6 +74,7 @@ func (p palette) tone(s string) tcell.Style {
 	}
 	return p.base
 }
+
 // focusBorder styles the panel edge beside the selected block. Heimdall marks
 // the focused section with a full gold border; desktop keeps a subdued line.
 func (p palette) focusBorder() tcell.Style {

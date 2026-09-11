@@ -32,6 +32,7 @@ func TestUnicodeControlsAndNarrowScreens(t *testing.T) {
 	m.rebuildRows()
 	m.page = fixturePage("answer")
 	m.detailKey = "a"
+	m.pageKey = "a"
 	s := tcell.NewSimulationScreen("UTF-8")
 	if err := s.Init(); err != nil {
 		t.Fatal(err)
@@ -314,6 +315,7 @@ func TestResizeAndToolFoldingPreserveReadingRecord(t *testing.T) {
 	m.transcript = true
 	m.page = fixturePage(strings.Repeat("A long final answer. ", 200))
 	m.detailKey = "a"
+	m.pageKey = "a"
 	m.page.Items[3].Text = strings.Repeat("Earlier user content. ", 200)
 	m.page.Items[1].Parts[0].Text = strings.Repeat("tool payload ", 200)
 	m.tools = true

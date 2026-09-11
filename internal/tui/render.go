@@ -24,12 +24,35 @@ func (m *model) paragraph(text, prefix, color string, row, entry, maxLines int) 
 		m.add(prefix+s, color, row, entry, "")
 	}
 }
+
 // activityDot maps archived evidence to the mockup's status circle:
 // green working signal, amber input requested or stale working, red capture
 // problem, empty circle for idle or unknown activity.
+// clusterDot reduces member evidence to the most urgent signal: a source
+// problem or pending input anywhere in the cluster outranks working/idle.
+func clusterDot(members []archive.Session) (string, string) {
+	best := "○"
+	tone := "dim"
+	for _, s := range members {
+		d, t := (&model{}).activityDot(s)
+		if t == "bad" {
+			return d, t
+		}
+		if t == "warn" {
+			best, tone = d, t
+		} else if t == "green" && tone == "dim" {
+			best, tone = d, t
+		}
+	}
+	return best, tone
+}
+
 func (m *model) activityDot(s archive.Session) (string, string) {
 	if s.SourceHealth == "blocked" {
 		return "●", "bad"
+	}
+	if s.SourceHealth == "capture_gaps" {
+		return "◐", "warn"
 	}
 	switch s.Activity {
 	case "input":
@@ -96,6 +119,28 @@ func (m *model) overview() {
 			lastGroup = r.group
 			seenTitles = map[string]bool{}
 		}
+		if r.cluster != nil {
+			dot, dotTone := clusterDot(r.cluster)
+			marker := "├─ " + dot + " "
+			if i == m.selected {
+				marker = "▸  " + dot + " "
+			}
+			chevron := "⊕"
+			if m.expandedClusters[clusterKey(r.group, r.cluster)] {
+				chevron = "⊖"
+			}
+			title := clusterTitle(r.cluster)
+			for _, s := range r.cluster {
+				if rowTitle(s) != title {
+					title = strings.TrimRight(title, " ") + "…"
+					break
+				}
+			}
+			m.add(marker+single(title)+fmt.Sprintf("  ×%d  %s", len(r.cluster), chevron), "bright", i, -1, "")
+			m.lines[len(m.lines)-1].dot = dotTone
+			m.add(fmt.Sprintf("│    %d sessions share this title · Enter expands", len(r.cluster)), "dim", i, -1, "")
+			continue
+		}
 		dot, dotTone := m.activityDot(s)
 		marker := "├─ " + dot + " "
 		if i == m.selected {
@@ -115,6 +160,9 @@ func (m *model) overview() {
 		if s.TitleKind == "derived" {
 			meta += " · derived title"
 		}
+		if s.TitleKind == "continuation" {
+			meta += " · continued session"
+		}
 		if s.LastRecordTime != nil {
 			meta += " · " + ago(*s.LastRecordTime)
 		}
@@ -130,12 +178,15 @@ func (m *model) overview() {
 		}
 		if i == m.selected && m.expanded {
 			m.add("│", "dim", i, -1, "")
-			if m.loading {
-				m.add("│    Loading recent context…", "dim", i, -1, "")
-			} else if m.detailKey == s.Key {
+			if m.pageKey == s.Key {
+				// Keep the current page visible while a refresh is in flight;
+				// the header's refreshing cue carries the in-progress signal.
 				m.description(i)
+			} else if m.loading {
+				m.add("│    Loading recent context…", "dim", i, -1, "")
 			}
-			m.add("╰─▸  Enter transcript  ·  h recaps  ·  surface unavailable", "amber", i, -1, "")
+			m.add("╰─▸  Enter transcript  ·  h latest recap  ·  surface unavailable", "amber", i, -1, "action")
+			m.add("", "", i, -1, "")
 		}
 	}
 	if len(m.rows) == 0 {
@@ -309,14 +360,8 @@ func (m *model) draw(screen tcell.Screen) {
 		st = m.palette.green
 	}
 	put(screen, 10, 1, w-12, state, st)
-	if w >= 90 {
-		mode := "1 sessions   2 transcript"
-		if m.transcript {
-			mode = "1 sessions   [2 transcript]"
-		} else {
-			mode = "[1 sessions]   2 transcript"
-		}
-		put(screen, w-32, 1, 30, mode, m.palette.dim)
+	if w >= 90 && m.transcript {
+		put(screen, w-24, 1, 22, "transcript · Esc back", m.palette.dim)
 	}
 	available, gaps := 0, 0
 	for _, s := range m.snapshot.Status.Sources {
@@ -327,24 +372,26 @@ func (m *model) draw(screen tcell.Screen) {
 			gaps++
 		}
 	}
-	checked := "never checked"
+	checked := "never refreshed"
 	if !m.checked.IsZero() {
-		checked = fmt.Sprintf("checked %ds ago", int(time.Since(m.checked).Seconds()))
+		checked = fmt.Sprintf("refreshed %ds ago", int(time.Since(m.checked).Seconds()))
 	}
 	meta := fmt.Sprintf("%d sessions · %d/%d sources available · %d with gaps · %s", m.snapshot.Status.Sessions, available, len(m.snapshot.Status.Sources), gaps, checked)
-	if len(m.snapshot.Status.Issues) > 0 {
-		meta += fmt.Sprintf(" · %d capture issues (d)", len(m.snapshot.Status.Issues))
+	metaSpans := []span{{meta, m.palette.dim}}
+	if m.loading {
+		metaSpans = append(metaSpans, span{" · refreshing", m.palette.accent})
 	}
-	for _, root := range m.snapshot.Status.Discovery {
-		if root.State != "available" && root.State != "pending" {
-			meta += " · discovery needs attention (d)"
-			break
-		}
+	putSpans(screen, 2, 2, w-4, metaSpans)
+	order := ""
+	if orderNames[m.ordering] != "recent" {
+		order = " · order " + orderNames[m.ordering]
 	}
-	put(screen, 2, 2, w-4, meta, m.palette.dim)
-	title := fmt.Sprintf("sessions / by %s · page %d · filter: %s", groupNames[m.grouping], m.sessionPage+1, m.filter)
+	title := fmt.Sprintf("sessions / by %s · page %d%s · filter: %s", groupNames[m.grouping], m.sessionPage+1, order, m.filter)
 	if m.filter == "" {
-		title = fmt.Sprintf("sessions / by %s · page %d · %d rows loaded", groupNames[m.grouping], m.sessionPage+1, len(m.rows))
+		title = fmt.Sprintf("sessions / by %s · page %d%s · %d rows loaded", groupNames[m.grouping], m.sessionPage+1, order, len(m.rows))
+	}
+	if m.hideIdle && !m.transcript {
+		title += " · idle hidden"
 	}
 	if m.transcript {
 		title = "transcript"
@@ -421,6 +468,11 @@ func (m *model) draw(screen tcell.Screen) {
 		}
 		if !m.transcript && l.row == m.selected && m.palette.theme != ThemeAmber {
 			left, right := "│", "│"
+			edge := displayStyle(screen, m.palette.selected(m.palette.focusBorder()))
+			if l.mark == "action" {
+				left = "├"
+				screen.SetContent(2, y+6, '─', nil, edge)
+			}
 			if m.palette.theme == ThemeHeimdall {
 				switch offset + y {
 				case selStart:
@@ -431,7 +483,21 @@ func (m *model) draw(screen tcell.Screen) {
 				if selStart == selEnd {
 					left = "▸"
 				}
+				if l.mark == "action" {
+					right = "┤"
+				}
 				put(screen, w-2, y+6, 1, right, m.palette.focusBorder())
+				if offset+y == selStart || offset+y == selEnd {
+					screen.SetContent(2, y+6, '─', nil, edge)
+					for x := 3 + min(uniseg.StringWidth(l.text), w-6); x < w-2; x++ {
+						screen.SetContent(x, y+6, '─', nil, edge)
+					}
+				}
+				// Extend the section edge to the inner gutter so lines inside
+				// the highlighted block read as connected items.
+				if mainc, comb, _, _ := screen.GetContent(3, y+6); mainc == '│' || mainc == '╰' {
+					screen.SetContent(3, y+6, mainc, comb, edge)
+				}
 			}
 			put(screen, 1, y+6, 1, left, m.palette.focusBorder())
 			if strings.HasPrefix(l.text, "▸") {
@@ -440,16 +506,12 @@ func (m *model) draw(screen tcell.Screen) {
 		}
 	}
 	status := m.notice
-	if status == "" {
-		if m.transcript {
-			kind := "current versions"
-			if m.history {
-				kind = "all revisions"
-			}
-			status = fmt.Sprintf("page %d from latest · %s · lines %d–%d / %d", m.transcriptPage+1, kind, min(offset+1, len(m.lines)), min(offset+bodyHeight, len(m.lines)), len(m.lines))
-		} else {
-			status = "● working · ◐ input/stale · ● source problem · ○ idle or unknown · ? help"
+	if status == "" && m.transcript {
+		kind := "current versions"
+		if m.history {
+			kind = "all revisions"
 		}
+		status = fmt.Sprintf("page %d from latest · %s · lines %d–%d / %d", m.transcriptPage+1, kind, min(offset+1, len(m.lines)), min(offset+bodyHeight, len(m.lines)), len(m.lines))
 	}
 	if m.transcript && m.page.Boundary < m.snapshot.Sessions.Boundary && m.page.Boundary != 0 {
 		status = "Archive changed since this page · r refresh · paging restarts if needed"
@@ -457,27 +519,63 @@ func (m *model) draw(screen tcell.Screen) {
 	if !m.connected && len(m.snapshot.Sessions.Items) > 0 {
 		status = "OFFLINE · cached archive view · reconnecting every 5 seconds"
 	}
-	if m.loading {
-		status = "Loading archive page…"
+	if status == "" {
+		warning := ""
+		if n := len(m.snapshot.Status.Issues); n > 0 {
+			warning = fmt.Sprintf("%d capture issues", n)
+		}
+		for _, root := range m.snapshot.Status.Discovery {
+			if root.State != "available" && root.State != "pending" {
+				if warning != "" {
+					warning += " · "
+				}
+				warning += "discovery needs attention"
+				break
+			}
+		}
+		if warning != "" {
+			putSpans(screen, 2, h-3, w-4, []span{
+				{"⚠ ", m.palette.warn},
+				{warning, m.palette.dim},
+				{" · ", m.palette.dim},
+				{"d", m.palette.accent}, {" diagnostics", m.palette.dim},
+			})
+		} else {
+			putSpans(screen, 2, h-3, w-4, []span{
+				{"●", m.palette.green}, {" working · ", m.palette.dim},
+				{"◐", m.palette.warn}, {" input/stale · ", m.palette.dim},
+				{"●", m.palette.bad}, {" source problem · ", m.palette.dim},
+				{"○", m.palette.dim}, {" idle or unknown", m.palette.dim},
+			})
+		}
+	} else {
+		put(screen, 2, h-3, w-4, status, m.palette.warn)
 	}
-	put(screen, 2, h-3, w-4, status, m.palette.warn)
-	keys := "↑↓ select  space expand  Enter read  g group  / filter  N/P pages  ? help  q quit"
+	// Key hints follow heimdall's footer: the key in accent, its action in dim.
+	keys := []string{"↑↓", "select", "space", "expand", "Enter", "read", "g", "group", "O", "order", "x", "idle", "/", "filter", "N/P", "pages", "?", "help", "q", "quit"}
 	if m.transcript {
-		keys = "j/k scroll  [/] turns  n/p recaps  space tools  / find  N/P pages  Esc back  ? help"
+		keys = []string{"j/k", "scroll", "[/]", "turns", "n/p", "recaps", "space", "tools", "/", "find", "N/P", "pages", "Esc", "back", "?", "help"}
 	}
 	if w < 90 {
-		keys = "↑↓ select  Enter read  / filter  ? help  q quit"
+		keys = []string{"↑↓", "select", "Enter", "read", "/", "filter", "?", "help", "q", "quit"}
 		if m.transcript {
-			keys = "j/k scroll  space tools  Esc back  ? help  q quit"
+			keys = []string{"j/k", "scroll", "space", "tools", "Esc", "back", "?", "help", "q", "quit"}
 		}
 	}
 	if w < 55 {
-		keys = "↑↓ move  Enter read  ? help  q quit"
+		keys = []string{"↑↓", "move", "Enter", "read", "?", "help", "q", "quit"}
 		if m.transcript {
-			keys = "j/k scroll  Esc back  ? help  q quit"
+			keys = []string{"j/k", "scroll", "Esc", "back", "?", "help", "q", "quit"}
 		}
 	}
-	put(screen, 2, h-2, w-4, keys, m.palette.accent)
+	keySpans := make([]span, 0, len(keys))
+	for i := 0; i+1 < len(keys); i += 2 {
+		if i > 0 {
+			keySpans = append(keySpans, span{"  ", m.palette.dim})
+		}
+		keySpans = append(keySpans, span{keys[i], m.palette.accent}, span{" " + keys[i+1], m.palette.dim})
+	}
+	putSpans(screen, 2, h-2, w-4, keySpans)
 	if m.editing {
 		label := "filter loaded sessions: "
 		if m.transcript {
@@ -543,7 +641,7 @@ func (m *model) overlay(screen tcell.Screen, title string, lines []string) {
 }
 func (m *model) drawHelp(screen tcell.Screen) {
 	m.overlay(screen, "skald / keyboard", []string{
-		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source or all     /  filter this session page", "h  open recaps     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  cycle heimdall/desktop/amber themes", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the recent 25-record window. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
+		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source, recency, status or all     O  order by recent, title or status     /  filter", "x  hide/show idle sessions     h  open transcript at the latest recap     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  cycle heimdall/desktop/amber themes", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the recent 25-record window. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
 }
 func (m *model) drawReference(screen tcell.Screen) {
 	e := m.selectedEntry()

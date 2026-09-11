@@ -192,6 +192,7 @@ func runScreen(ctx context.Context, screen tcell.Screen, backend Backend, theme 
 				m.transcriptPage = r.index
 				m.page = r.page
 				m.detailKey = r.key
+				m.pageKey = r.key
 				m.notice = ""
 			}
 		case event := <-events:
@@ -419,13 +420,52 @@ func runScreen(ctx context.Context, screen tcell.Screen, backend Backend, theme 
 							m.resetDetail()
 							moved = true
 						}
+					case key == 'O':
+						oldKey := ""
+						if s := m.current(); s != nil {
+							oldKey = s.Key
+						}
+						m.ordering = (m.ordering + 1) % len(orderNames)
+						m.rebuildRows()
+						m.overviewScroll = 0
+						if s := m.current(); s == nil || s.Key != oldKey {
+							m.resetDetail()
+							moved = true
+						}
+					case key == 'x':
+						oldKey := ""
+						if s := m.current(); s != nil {
+							oldKey = s.Key
+						}
+						m.hideIdle = !m.hideIdle
+						m.rebuildRows()
+						if s := m.current(); s == nil || s.Key != oldKey {
+							m.resetDetail()
+							moved = true
+						}
 					case key == ' ':
-						m.expanded = !m.expanded
-						if m.expanded {
-							fetchDetail()
+						if m.selected >= 0 && m.selected < len(m.rows) && m.rows[m.selected].cluster != nil {
+							k := clusterKey(m.rows[m.selected].group, m.rows[m.selected].cluster)
+							if m.expandedClusters == nil {
+								m.expandedClusters = map[string]bool{}
+							}
+							m.expandedClusters[k] = !m.expandedClusters[k]
+							m.rebuildRows()
+						} else {
+							m.expanded = !m.expanded
+							if m.expanded {
+								fetchDetail()
+							}
 						}
 					case ev.Key() == tcell.KeyEnter || key == 'h' || key == '2':
-						if m.current() != nil {
+						if m.selected >= 0 && m.selected < len(m.rows) && m.rows[m.selected].cluster != nil && key != 'h' {
+							k := clusterKey(m.rows[m.selected].group, m.rows[m.selected].cluster)
+							if m.expandedClusters == nil {
+								m.expandedClusters = map[string]bool{}
+							}
+							m.expandedClusters[k] = !m.expandedClusters[k]
+							m.rebuildRows()
+						} else if m.current() != nil {
 							m.transcript = true
 							m.pendingRecap = key == 'h'
 							m.scroll = 0

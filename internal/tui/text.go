@@ -121,6 +121,26 @@ func put(screen tcell.Screen, x, y, w int, s string, style tcell.Style) {
 	}
 }
 
+// span renders a run of text in one style; putSpans lays out a status or key
+// line as alternating accents and descriptions like heimdall's footer.
+type span struct {
+	text  string
+	style tcell.Style
+}
+
+func putSpans(screen tcell.Screen, x, y, w int, spans []span) {
+	cx := x
+	for _, sp := range spans {
+		rem := x + w - cx
+		if rem <= 0 {
+			return
+		}
+		s := clip(single(sp.text), rem)
+		put(screen, cx, y, rem, s, sp.style)
+		cx += uniseg.StringWidth(s)
+	}
+}
+
 // Avoid tcell's brightness-based monochrome inversion. NO_COLOR remains
 // respected: only selection uses reverse video, and emphasis uses attributes.
 func displayStyle(screen tcell.Screen, style tcell.Style) tcell.Style {
