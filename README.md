@@ -1,12 +1,45 @@
 # Skald
 
+An archive of Claude Code, Codex and Devin conversations, kept with exact provenance so past context can be found and trusted.
+
+Conversations are scattered across tools and can be rewritten or deleted. Skald keeps selected source bytes alongside normalized records, exposes gaps and rewrites, and serves exact reads through a terminal UI and CLI. It does not install hooks or change provider settings.
+
+**Proof:** 49 Go test functions ([archive tests](internal/archive/), [capture tests](sessioncapture/)) · session-list p95 of 49 ms over 20,000 synthetic records ([measurement](docs/ARCHIVE-BENCHMARK.json)). Test counts are declarations, not fresh pass results.
+
+**Part of:** the agent runtime alongside [Heimdall](https://github.com/algorhythmic/heimdall), [Braid](https://github.com/algorhythmic/braid) and [Wayland Computer Use](https://github.com/algorhythmic/wayland-computer-use). Heimdall uses Skald's capture library; Skald's Braid integration is planned.
+
+[![Skald terminal UI showing conversations grouped by project and an expanded session recap](docs/images/skald-tui.png)](docs/images/skald-tui.png)
+
+*Browse conversations by project, inspect session recaps, and see source availability. Select the screenshot to view it at full size.*
+
+## Quick start
+
+Needs Linux and Go with support for the pinned 1.27.1 toolchain.
+
+```sh
+git clone https://github.com/algorhythmic/skald.git && cd skald
+make build
+./bin/skald sources --provider claude_code  # preview sources
+./bin/skald connect --provider claude_code  # select a source for capture
+./bin/skald                                # daemon and terminal UI
+```
+
+## Status and limits
+
+Local archive, browsing, exact reads, backup and restore work on Linux. Claude Code, Codex and Devin support is checked against samples, not every provider version. Braid retrieval, read-only MCP and portable exports are planned. Browser/cloud conversations and subagent transcripts are not covered. The latency result is a small local benchmark; storage growth remains a release concern. [Full status](STATUS.md).
+
+---
+
+## Detailed overview
+
 Skald provides an overview of conversation context across projects, terminals,
 desktop apps and other supported environments. It complements Heimdall: Skald
 preserves source conversations; Heimdall owns accepted task state. Each works
 independently, with reusable parsing and explicit provenance at the boundary.
 
 The archive daemon, CLI and native terminal UI are runnable on Linux. They retain
-selected Claude/Codex transcripts independently and support exact
+selected Claude Code and Codex transcripts and Devin desktop session stores
+independently and support exact
 reads, backup and restore. Browse project groups, excerpts, recaps and transcript
 history with `skald tui`. See [TUI usage](docs/TUI.md),
 [archive setup](docs/ARCHIVE-SETUP.md) and [implementation status](STATUS.md).
@@ -98,3 +131,19 @@ sources and a real private Unix socket. Override `GO=/absolute/path/to/go` when 
 
 All checked-in conversation fixtures are synthetic. Tests do not open personal
 transcripts, contact Heimdall or make summarization/embedding requests.
+
+
+## Compatibility and validation details
+
+**Works with:** Claude Code, Codex (CLI and desktop) and Devin desktop as conversation sources. Read-only local samples confirmed the Claude Code 2.1.263 and Codex 0.153.4 file formats and 13 Devin desktop session stores. Agents cannot query Skald over MCP yet; read-only MCP is planned.
+
+- **Works today (Linux):** sole-writer archive daemon, source connection for Claude Code, Codex and Devin desktop, backfill and tailing with explicit gaps, a terminal UI for browsing projects, recaps and transcript history, exact historical reads, and online backup with fresh-directory restore.
+- **Planned:** Braid retrieval and read-only MCP for agents; archive-wide descriptions and fresher activity selection; optional Heimdall read enrichment; portable exports.
+- **Not covered:** browser/cloud conversations, subagent transcripts, and fork/alias tracking across conversations. Provider support is checked against samples, not proven complete.
+- **What the numbers do not prove:** the test figure counts `func Test…` declarations (subtests excluded), not passing results, and there is no CI workflow in this repository. The latency figure is one small-record local run on warm caches and includes CLI start-up and socket transport. The same run stored 26.81× the source bytes, so storage growth on large transcripts is still a release concern. Full archive release acceptance is not claimed.
+
+Full detail: [STATUS.md](STATUS.md).
+
+## License
+
+[Apache License 2.0](LICENSE).
