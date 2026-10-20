@@ -21,12 +21,14 @@ type RootStatus struct {
 	Issues        map[string]string `json:"issues"`
 }
 type Status struct {
-	Discovery []RootStatus           `json:"discovery"`
-	Instance  string                 `json:"archive_instance"`
-	Boundary  int64                  `json:"boundary"`
-	Sessions  int64                  `json:"sessions"`
-	Sources   []archive.SourceHealth `json:"sources"`
-	Issues    map[string]string      `json:"capture_issues"`
+	Discovery      []RootStatus           `json:"discovery"`
+	Instance       string                 `json:"archive_instance"`
+	Boundary       int64                  `json:"boundary"`
+	Sessions       int64                  `json:"sessions"`
+	Sources        []archive.SourceHealth `json:"sources"`
+	SourcesTotal   int64                  `json:"sources_total"`
+	SourcesOmitted int64                  `json:"sources_omitted"`
+	Issues         map[string]string      `json:"capture_issues"`
 }
 type Snapshot struct {
 	Status   Status

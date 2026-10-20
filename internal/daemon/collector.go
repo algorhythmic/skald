@@ -120,7 +120,7 @@ func (c *Collector) Scan(ctx context.Context) bool {
 			_ = c.Store.SetHealth(ctx, source, "unavailable", time.Now())
 			continue
 		}
-		if err := c.Store.Ingest(ctx, source, cp, batch, time.Now()); err != nil {
+		if err := c.acceptCapture(ctx, source, cp, batch); err != nil {
 			code := "archive_write_failed"
 			if errors.Is(err, archive.ErrCapacity) {
 				code = "capture_capacity_limit"
@@ -153,6 +153,22 @@ func (c *Collector) Scan(ctx context.Context) bool {
 		more = more || batch.More
 	}
 	return more
+}
+
+// The standalone archive consumes the same boundary as a future workstation
+// destination. Its checkpoint is read from that archive on the next scan; this
+// local destination name is not an acknowledgement for any peer or remote sink.
+func (c *Collector) acceptCapture(ctx context.Context, source archive.Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch) error {
+	delivery, err := sessioncapture.NewDelivery(source.Source, previous, batch)
+	if err != nil {
+		return err
+	}
+	sink, err := c.Store.CaptureSink("skald:standalone-archive", source)
+	if err != nil {
+		return err
+	}
+	_, err = sessioncapture.Deliver(ctx, sink, delivery)
+	return err
 }
 
 type walTick struct {

@@ -109,6 +109,36 @@ capture are separate: an available directory does not prove all conversations
 were captured. `probe_limit`, `partial`, `capacity_reached` and `unavailable` remain
 visible. Rejection counts can exceed the bounded 16-item diagnostic sample.
 
+Each captured-file status row identifies its enrolled stream without returning a
+source path or conversation body. `enrolled` remains true when the file disappears;
+`health` changes to `unavailable`, and `capture_issues` reports a bounded reason
+code. A successful retry clears the issue. On daemon startup, enrollment resets
+health to `unknown` until the collector checks the source again.
+
+`checkpoint_available` distinguishes a saved checkpoint from a stream that has
+never completed a capture batch. `stream_generation`, `stream_epoch`,
+`next_ordinal`, `captured_offset` and `parsed_offset` describe committed capture
+position; the ordinal is the next record position, not a record identifier. Byte
+offsets describe the adapter's input (the canonical dump for Devin). Gaps remain
+visible in `has_gaps`. A missing checkpoint has null generation, epoch and ordinal;
+the legacy zero byte offsets alone do not prove an empty source was captured.
+
+Three timestamps have separate meanings. `checked_at` is the last source-health
+check. `last_captured_at` is when the latest record before the current checkpoint
+was first archived in its current generation. `last_source_time` is that exact
+record's native timestamp. An idle poll or replay does not refresh record age,
+and a missing native timestamp stays null even when older records had timestamps.
+An empty checkpoint has no record timestamps. The TUI shows elapsed ages and
+explicit unknowns, including unknown age when a timestamp is ahead of its clock.
+These are archive and source observations, not live presence or task completion.
+They survive daemon restart and archive restore; an old successful check is not a
+claim that the source is currently reachable.
+
+The status response keeps at most 256 source rows in stable stream-key order.
+`sources_total` and `sources_omitted` report the total enrolled streams and omitted
+rows within the requested namespace scope. The TUI shows a notice when rows are
+omitted. These metadata fields do not widen namespace access.
+
 Configuration is loaded at daemon startup. Restart after connecting another root,
 changing a cutoff or capacity, or removing a root. Removing a namespace from the
 configuration removes it from the active read corpus but retains its archived
@@ -127,6 +157,10 @@ The new flow is covered by metadata/confinement tests, configuration integrity a
 idempotency checks, discovery/relocation/scope/capacity tests, preserved-mtime rewrite
 checks, and compiled acceptance through a real Unix socket (`make discovery-smoke`).
 All committed test data is synthetic.
+
+Health regression checks cover unknown checkpoints, missing and nonmonotonic
+native timestamps, idle replays, source loss/reappearance, daemon initialization,
+archive restart/restore, scoped counts and omission, and status scope denial.
 
 A read-only local sample on 2026-09-10 identified Claude Code 2.1.263 and Codex
 0.153.4, including `codex_work_desktop` origin metadata. Bounded native parsing

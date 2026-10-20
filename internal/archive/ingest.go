@@ -963,16 +963,6 @@ func (s *Store) stats(ctx context.Context, namespaces []string) (map[string]any,
 	return map[string]any{"archive_instance": s.instance, "schema_version": SchemaVersion, "contract_version": 1, "boundary": boundary, "sessions": sessions, "record_versions": versions, "retrieval": "unavailable", "surface_activation": "unsupported"}, nil
 }
 
-func (s *Store) Status(ctx context.Context, namespaces []string) (map[string]any, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	status, err := s.stats(ctx, namespaces)
-	if err != nil {
-		return nil, err
-	}
-	status["sources"], err = s.health(ctx, namespaces)
-	return status, err
-}
 func scopeSQL(namespaces []string) (string, []any) {
 	if len(namespaces) == 0 {
 		return "NULL", nil

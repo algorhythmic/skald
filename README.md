@@ -4,7 +4,7 @@ An archive of Claude Code, Codex and Devin conversations, kept with exact proven
 
 Conversations are scattered across tools and can be rewritten or deleted. Skald keeps selected source bytes alongside normalized records, exposes gaps and rewrites, and serves exact reads through a terminal UI and CLI. It does not install hooks or change provider settings.
 
-**Proof:** 49 Go test functions ([archive tests](internal/archive/), [capture tests](sessioncapture/)) · session-list p95 of 49 ms over 20,000 synthetic records ([measurement](docs/ARCHIVE-BENCHMARK.json)). Test counts are declarations, not fresh pass results.
+**Evidence:** [archive tests](internal/archive/), [capture tests](sessioncapture/) and [recorded verification](STATUS.md) · session-list p95 of 49 ms over 20,000 synthetic records ([measurement](docs/ARCHIVE-BENCHMARK.json)).
 
 **Part of:** the agent runtime alongside [Heimdall](https://github.com/algorhythmic/heimdall), [Braid](https://github.com/algorhythmic/braid) and [Wayland Computer Use](https://github.com/algorhythmic/wayland-computer-use). Heimdall uses Skald's capture library; Skald's Braid integration is planned.
 
@@ -33,9 +33,12 @@ Local archive, browsing, exact reads, backup and restore work on Linux. Claude C
 ## Detailed overview
 
 Skald provides an overview of conversation context across projects, terminals,
-desktop apps and other supported environments. It complements Heimdall: Skald
-preserves source conversations; Heimdall owns accepted task state. Each works
-independently, with reusable parsing and explicit provenance at the boundary.
+desktop apps and other supported environments. Skald owns conversation capture,
+archive preservation and standalone browsing. Its reusable packages preserve
+source identity and provenance without owning accepted task state. The proposed
+Odin integration retains this standalone product and places commitment authority
+in Odin after a separately gated Heimdall migration; no task cutover is implemented
+by Skald. See the [producer integration plan](docs/ODIN-INTEGRATION-PLAN.md).
 
 The archive daemon, CLI and native terminal UI are runnable on Linux. They retain
 selected Claude Code and Codex transcripts and Devin desktop session stores
@@ -46,7 +49,8 @@ history with `skald tui`. See [TUI usage](docs/TUI.md),
 
 - [Connect real conversation sources](docs/SOURCES.md)
 - [Implementation plan](SKALD-IMPLEMENTATION-PLAN.md)
-- [Heimdall amendment — context only](SKALD-HEIMDALL-AMENDMENT.md)
+- [Odin integration: scope, first batch and producer release gates](docs/ODIN-INTEGRATION-PLAN.md)
+- [Heimdall amendment — historical consumer policy](SKALD-HEIMDALL-AMENDMENT.md)
 - [Session overview design](skald-window.html) and [transcript design](skald-transcript.html)
 - [Record and checkpoint contract](docs/CONTRACT-V1.md)
 
@@ -138,9 +142,9 @@ transcripts, contact Heimdall or make summarization/embedding requests.
 **Works with:** Claude Code, Codex (CLI and desktop) and Devin desktop as conversation sources. Read-only local samples confirmed the Claude Code 2.1.263 and Codex 0.153.4 file formats and 13 Devin desktop session stores. Agents cannot query Skald over MCP yet; read-only MCP is planned.
 
 - **Works today (Linux):** sole-writer archive daemon, source connection for Claude Code, Codex and Devin desktop, backfill and tailing with explicit gaps, a terminal UI for browsing projects, recaps and transcript history, exact historical reads, and online backup with fresh-directory restore.
-- **Planned:** Braid retrieval and read-only MCP for agents; archive-wide descriptions and fresher activity selection; optional Heimdall read enrichment; portable exports.
+- **Planned:** Braid retrieval and read-only MCP for agents; archive-wide descriptions and fresher activity selection; published capture delivery and archive-change contracts for Odin; optional external task read enrichment; portable exports.
 - **Not covered:** browser/cloud conversations, subagent transcripts, and fork/alias tracking across conversations. Provider support is checked against samples, not proven complete.
-- **What the numbers do not prove:** the test figure counts `func Test…` declarations (subtests excluded), not passing results, and there is no CI workflow in this repository. The latency figure is one small-record local run on warm caches and includes CLI start-up and socket transport. The same run stored 26.81× the source bytes, so storage growth on large transcripts is still a release concern. Full archive release acceptance is not claimed.
+- **What the numbers do not prove:** there is no CI workflow in this repository; recorded local checks do not close the full release gates. The latency figure is one small-record local run on warm caches and includes CLI start-up and socket transport. The same run stored 26.81× the source bytes, so storage growth on large transcripts is still a release concern.
 
 Full detail: [STATUS.md](STATUS.md).
 

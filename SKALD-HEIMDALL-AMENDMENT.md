@@ -5,6 +5,17 @@ Status: adopted design on 2026-09-10 and applied to handoff r4, with the
 §4.2 purgeable evidence-table correction. Implementation remains S1/S3/S5 work.
 “Session Lens” in the review refers to Skald; the product name remains Skald.
 
+**2026-10-19 scope note:** the adopted policy below is a historical Heimdall
+consumer design, not a permanent task-authority arrangement for the proposed
+Odin integration. The [Skald producer plan](docs/ODIN-INTEGRATION-PLAN.md) retains
+Skald's standalone archive and browser and prepares EC-14. Odin's proposed target
+is a one-time task import and fenced Heimdall writer under EC-13, not a permanent
+two-way bridge. Heimdall must record its own retirement decision and enforcement;
+this Skald document neither changes its record nor authorizes a live cutover.
+Its existing authority still applies to scope that has not been migrated.
+Sections 4–7 preserve the earlier adoption and acceptance history; they do not
+schedule new Heimdall feature work ahead of that project's own scope decision.
+
 Companion: [Skald implementation plan](SKALD-IMPLEMENTATION-PLAN.md).
 Its §4 defines the version-1 shared session-record contract and L0 freeze gates. This
 amendment defines Heimdall's consumer policy rather than a second record schema.
@@ -43,7 +54,7 @@ design documents only; manual preservation still dispatches no Git operations.
 
 | Information or behavior | Owner and boundary |
 | --- | --- |
-| Accepted contracts, decisions, task/step state, checkpoints, dependencies | Heimdall, through existing authorized commands and event transactions |
+| Accepted contracts, decisions, task/step state, checkpoints, dependencies | Heimdall for existing unmigrated scope, through its authorized commands; the proposed Odin destination requires the separate EC-13 decision, import and writer fencing |
 | Task-owned workspace, viewport and session bindings | Heimdall's existing declaration/observation/verification rules |
 | Native conversation content and provider events | Originating provider; reusable capture code preserves source identity and provenance |
 | Comprehensive archive, native description history, local session groups | Skald, under its own retention policy |
@@ -62,8 +73,10 @@ not gate either application's local state, checkpoints or supported collection.
 Some duplicate persistence is intentional: a native description can exist in a
 CLI transcript, Skald's archive, a bounded Heimdall evidence record and a
 Braid index. Each copy has a declared purpose and source revision. There must be
-one Heimdall authority for accepted task state, but there need not be one physical
-copy of every piece of source text across independent products.
+one permitted task writer for each scope. The proposed migrated scope belongs to
+Odin only after the separate import and fencing gates; this document leaves
+unmigrated Heimdall ownership intact. There need not be one physical copy of every
+piece of source text across independent products.
 
 Heimdall’s S1 panel shows bound conversations, lifecycle and the current available
 description (or a coverage gap). Skald’s window shows the conversation archive.
@@ -290,6 +303,10 @@ by each consumer; a shared storage backend is unnecessary for these reads.
 
 ## 5. Optional Skald feed
 
+This section preserves the historical feed design; it is not an implemented
+archive-change API or a new commitment to a permanent Heimdall integration. The
+current producer work is tracked in [the Odin integration plan](docs/ODIN-INTEGRATION-PLAN.md).
+
 Direct collection is the independence baseline. A later configured feed can
 reduce duplicate source scanning when both services are present, while Heimdall
 still retains its own selected evidence.
@@ -360,8 +377,9 @@ assignment if a Heimdall instance later becomes available.
    action/receipt integration are verified. Skald L6 does not gate Heimdall
    S1 or require Heimdall to store a comprehensive transcript archive.
 
-No existing task-state subsystem is removed, no shared database is introduced,
-and no CLI parser migration is required before those future features exist.
+The September adoption removed no task-state subsystem and introduced no shared
+database. Future retirement requires Heimdall's EC-13 record and tested writer
+fencing; this amendment is not evidence that either has happened.
 
 ## 8. References
 

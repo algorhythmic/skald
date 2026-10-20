@@ -585,7 +585,10 @@ func TestDevinFilePathProjects(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(repo, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	scratch := t.TempDir() // no .git: not a project
+	// Only the referenced path is needed; no scratch file is opened. Keep this
+	// synthetic path outside the test temp directory, whose ancestors may be a
+	// checkout (or expose a sandbox .git marker).
+	scratch := filepath.Join(string(filepath.Separator), "skald-fixture-scratch-"+NewID())
 	r := Registration{Source: sessioncapture.Source{Namespace: "fixture:devin", Provider: sessioncapture.Devin, StreamID: "s1", ConversationID: "devin-conv"}, Root: t.TempDir(), Path: "session.db"}
 	if err := s.Register(ctx, []Registration{r}); err != nil {
 		t.Fatal(err)

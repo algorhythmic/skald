@@ -1,11 +1,52 @@
 # Skald implementation status
 
-2026-09-10. **Source connection, archive daemon and native TUI are implemented and verified.**
+Updated 2026-10-19. **Source connection, archive daemon and native TUI are implemented and verified.**
 Skald can now enroll primary conversations in selected Claude/Codex roots and
 Devin desktop session stores (`acp-messages` SQLite),
 retain independent history, serve bounded reads, and back up/restore its archive.
 The TUI browses project groups, bounded excerpts, native recaps and transcript
 history through the socket API. Retrieval and peer integrations remain future work. The full release gates below remain open.
+
+## Initial Odin integration batch — 2026-10-19
+
+The first Skald-owned OHS-02/03/07 changes are implemented from baseline
+`22114dd`; a tagged producer release and consumer pins remain pending. The
+[producer plan](docs/ODIN-INTEGRATION-PLAN.md) retains the standalone archive,
+CLI and TUI and records the remaining EC-14 publication and consumer checks.
+
+- Added a versioned [capture-delivery envelope](docs/CAPTURE-DELIVERY-V1.md), stable batch identity, strict wire
+  validation, JSON Schema and synthetic shared fixtures. The public sink boundary
+  returns an acknowledgement for one destination only after atomic acceptance.
+  The standalone daemon now uses its archive adapter through that boundary.
+- Added scoped source enrollment, checkpoint generation/epoch/ordinal, capture
+  and native record timestamps, and explicit omitted-source counts. TUI diagnostics
+  separate source checks from record age and display unknown native timestamps.
+  Idle polls do not make old capture evidence appear fresh.
+- Extended recovery checks for source loss/reappearance, restart and restore;
+  corrected the version command to use the actual archive schema constant.
+  A pre-existing project-association fixture now uses an environment-independent
+  synthetic scratch path instead of assuming `/tmp` has no Git ancestor.
+- Recorded a metadata-only inventory of the installed daemon: 174 enrolled streams
+  across Claude Code, Codex and Devin, including explicit blocked, unavailable
+  and gapped sources. See the [receipt](docs/IMPLEMENTATION-RECEIPT-2026-10-19.md)
+  for counts, baseline checks and remaining live-source investigation.
+
+The archive sink intentionally refuses stale previous checkpoints after an
+uncertain acknowledgement; callers reconcile persisted state before continuing.
+This is not durable receipt storage or exactly-once delivery. The public archive
+change feed, workstation spool, per-destination durable acknowledgement state,
+redaction/removal propagation, producer release and Odin pins remain open. Large
+delivery validation cost is not yet benchmarked. A hot Devin WAL before the first
+checkpoint retains its existing blocked-capture limitation. No live installation,
+source configuration, peer repository or task authority was changed.
+
+Integrated verification: `make check smoke tui-smoke discovery-smoke` passed,
+including Go tests, JSON Schema conformance, SQLite DDL checks, vet, compiled
+daemon recovery, standalone TUI terminal restoration and source discovery.
+`go test -race ./...` also passed with the project toolchain and caches. The
+compiled version command reports archive schema 5. Socket/PTY checks ran
+with the required sandbox access; all runtime fixtures used private temporary
+synthetic state. `git diff --check` and updated documentation links also pass.
 
 ## Delivered
 
@@ -53,7 +94,7 @@ history through the socket API. Retrieval and peer integrations remain future wo
   bookkeeping pages to open-but-idle sessions. A consumed input request reads
   as working; cross-stream signal
   ordering is labeled ambiguous. This is archived evidence, not live presence.
-- SQLite schema 4 with original bytes, immutable source and normalization versions,
+- SQLite schema 5 with original bytes, immutable source and normalization versions,
   separate source-order observations/generation epochs, checkpoint/change commits,
   capture gaps, source health, record heads and project observations. Native titles
   have bounded attributable projections; ambiguous cross-stream ordering is labeled.

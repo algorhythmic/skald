@@ -7,7 +7,12 @@ This document now lives in Skald's own project, alongside the TUI design studies
 
 Companion document: [Heimdall design amendment](SKALD-HEIMDALL-AMENDMENT.md).
 The two documents share the session-record contract defined in §4 below. The
-amendment explains how Heimdall would consume it without depending on Skald.
+amendment records the historical Heimdall consumer policy. The
+[Odin integration plan](docs/ODIN-INTEGRATION-PLAN.md), prepared 2026-10-19, defines
+the current Skald-owned implementation direction: retain the standalone archive,
+CLI and TUI, prepare the EC-14 producer boundary, and keep task authority outside
+Skald. It supersedes permanent Heimdall-ownership assumptions for future work;
+it does not change a peer's decisions, complete a release gate, or enable a cutover.
 
 ## 0. Naming and review decisions (2026-09-10)
 
@@ -63,9 +68,10 @@ Wayland, grouped by project, Herdr Space, or a user-defined session group.
 
 The implementation must satisfy these decisions:
 
-1. **Independent operation.** Skald collects, stores, displays and retrieves
-   session information with Heimdall absent. Heimdall retains its own direct
-   collection path when Skald is absent. Neither opens the other's database.
+1. **Independent operation.** Skald collects, stores and displays session
+   information with Odin and Heimdall absent; future retrieval keeps that property.
+   Reusable capture consumers use their own persistence and do not require the
+   Skald daemon. No consumer opens or migrates another product's database.
 2. **Shared parsing, separate retention.** Provider parsing produces reusable
    normalized records. Each application decides which records to retain and how
    to interpret them. Repeated storage serving independent products is acceptable.
@@ -78,9 +84,12 @@ The implementation must satisfy these decisions:
 5. **Braid is an integrated component.** Skald owns its Braid adapter,
    configuration and datasets. WCU and Heimdall can use their own integrations.
    There is no mandatory global Braid service or ecosystem-wide database.
-6. **Task authority stays with Heimdall.** Skald owns its session groups,
-   annotations and source observations. Imported Heimdall assignments and accepted
-   task state retain their external identity, revision and provenance.
+6. **Task authority stays outside Skald.** Skald owns its session groups,
+   annotations and source observations. Odin's proposed integration makes its
+   commitment record the single task authority after the EC-13 migration and
+   writer fencing. Until that separately accepted cutover, existing Heimdall
+   scope keeps its current writer. Imported task state always retains its owning
+   instance, identity, revision and provenance; Skald never edits a task replica.
 7. **Preservation has separate scopes.** Skald owns full conversation
    archival and consistent archive backups. Dotprivate is an optional destination
    for project documents, artifacts and selected session exports. Neither Git
@@ -148,8 +157,10 @@ flowchart TD
     Store --> Publisher["Skald retrieval publisher"]
     Publisher --> Braid["Application-owned Braid component"]
     Braid --> API
-    Heimdall["Optional Heimdall read adapter"] --> Store
-    Store --> Feed["Optional normalized change feed for Heimdall"]
+    Tasks["Optional external task read adapter"] --> Store
+    Capture --> Sink["Versioned capture sink boundary"]
+    Sink --> Consumer["Future workstation capture consumer"]
+    Store --> Feed["Planned public archive change feed"]
     Store --> Backup["Consistent archive backup"]
     Store --> Export["Optional selected session and artifact exports"]
     Export --> Dotprivate["Dotprivate private Git repository"]
@@ -163,7 +174,7 @@ Planned package responsibilities:
 | Component | Responsibility |
 | --- | --- |
 | `sessionrecord` | Versioned public record types, identity rules and conformance fixtures |
-| `sessioncapture` | Provider discovery, capability probing, incremental parsing and normalization; no Heimdall imports or durable application writes |
+| `sessioncapture` | Provider discovery, capability probing, incremental parsing, normalization and versioned collector/sink delivery boundary; no peer task state or application-owned persistence |
 | `internal/archive` | Single writer, source checkpoints, artifact versions, projections, backup and retention |
 | `internal/activity` | Evidence-based activity and freshness calculations |
 | `internal/api`, `internal/mcp` | Bounded reads, local management operations, scope enforcement and change delivery |
@@ -250,8 +261,9 @@ only when the source or user explicitly identifies it. A parser does not extract
 new decisions or handoffs by interpreting arbitrary prose.
 
 Native notes and recaps remain source claims. User-defined group membership is
-local organization. Imported Heimdall state is an external, revisioned snapshot.
-None of those categories is interchangeable with accepted Heimdall task state.
+local organization. Imported task state is an external, revisioned snapshot with
+an explicit owning service. Neither source claims nor local organization create
+accepted obligations or change the authoritative task record.
 
 An abbreviated synthetic envelope, using illustrative keys and digests:
 
@@ -457,7 +469,7 @@ Keep the following ownership boundaries even when all products are installed:
 | Session/project associations and user annotations | Skald revisioned relations; included in full archive backups |
 | Selected project notes, documentation, scratchpads and ordinary generated files | Dotprivate can preserve these independently of Skald |
 | Selected conversation exports and associated artifact copies | Skald prepares a portable package; dotprivate is an optional transport/destination |
-| Accepted task state and checkpoint preservation evidence | Heimdall's existing command, checkpoint and receipt model |
+| Accepted task state and checkpoint preservation evidence | The owning task service; current Heimdall scope until a separately accepted migration to Odin, always through its command and receipt model |
 | Retrieval passages | Consumer-owned Braid datasets rebuilt from permitted archive records or selected files |
 
 Capture configured native sources where they live, including outside project
@@ -612,8 +624,10 @@ are escaped in display while original bytes remain in the archive.
 ## 8. Read interfaces and agent consumption
 
 The following operations are proposed, with common bounded pagination and
-structured errors. The read-only L0 foundation CLI is documented in
-[README.md](README.md); service operations below remain planned for L1–L3.
+structured errors. The current CLI and bounded archive reads are documented in
+[README.md](README.md) and [STATUS.md](STATUS.md). This table describes intended
+interfaces, not the list of implemented RPC methods: `changes.read`, retrieval
+and MCP remain separate work. Internal change rows are not a public change feed.
 
 | Operation | Result |
 | --- | --- |
@@ -635,14 +649,16 @@ Cursors bind archive instance, scope generation, ordering and high-water mark.
 An expired cursor returns `cursor_expired` with a scoped snapshot/reconciliation
 route; it never silently skips history. A snapshot and its subsequent change
 cursor share one archive boundary. Deletions and revisions appear in the feed.
-Raw bodies are optional feed projections; a Heimdall subscriber selects the
-restricted record set in the companion amendment.
+Raw bodies are optional feed projections; each subscriber selects only its
+permitted record set. The historical Heimdall policy remains in the companion
+amendment. The capture-delivery boundary and an archive-change cursor are distinct
+contracts; delivering a capture batch does not implement `changes.read`.
 
 Every MCP response requires a `provenance` envelope: producer, authority class,
 configured scope, and applicable archive/source/target/index revisions; unknowns
 are explicit. Mixed records retain per-item provenance. Empty and error responses
 also carry producer/scope provenance. Skald `context.query` is source conversation
-evidence, not accepted Heimdall state; imported accepted state retains Heimdall’s
+evidence; imported accepted task state retains the owning service's
 instance/target/revision. Test omitted provenance as a response conformance
 failure. This is a wire requirement, not a display convention.
 
@@ -780,31 +796,43 @@ without sharing databases with Heimdall or WCU. Local capture freshness, Git syn
 state and Braid publication revision remain separate diagnostics. Importing a
 document or recap never accepts a Heimdall decision or validates a WCU recipe.
 
-## 10. Optional Heimdall integration
+## 10. Producer integration and external task context
 
-Skald can read supported, authenticated Heimdall task/context/history
-interfaces to enrich rows and retrieval. Use existing read scope; missing access
-is an unavailable association, not a reason to inspect Heimdall's database.
-Mirror instance/target/revision and fetch time. When Heimdall is unavailable, show
-cached associations as historical and continue all Skald core functions.
+Skald retains its archive, CLI and TUI as maintained standalone capabilities.
+The [Odin integration plan](docs/ODIN-INTEGRATION-PLAN.md) maps OHS-02/03/07 to
+Skald's existing gates and the EC-14 producer work. Prepare a versioned public
+collector/sink boundary and synthetic fixtures first. A public archive changes
+reader, durable workstation spool, per-destination acknowledgements, publication
+and consumer pins remain distinct deliverables. Internal database tables are
+never the consumer API. The local archive remains a sink and keeps sole-writer,
+checkpoint, backup and restore guarantees.
 
-Heimdall can independently reuse the capture package. A later optional feed mode
-can consume Skald normalized records instead of reading those same sources
-directly. Direct and feed transports preserve source keys and source revisions;
-each receiver owns its checkpoints and retained subset. A direct fallback must
-reconcile source records, because a Skald delivery cursor is not a native
-file offset. Duplicate overlap is handled by source identity, not timing guesses.
+Odin's target is one editable commitment authority after importing and fencing
+Heimdall's migrated records. This is not a permanent task-state synchronization
+bridge. Skald neither performs the migration nor establishes that Heimdall has
+accepted EC-13; existing task writers remain unchanged by this plan. The older
+Heimdall amendment is retained as historical consumer policy until its owner
+records the required disposition.
 
-Do not require automatic feed/direct failover for the first standalone releases.
-Implement and prove each transport independently, then add failover with the
-gap/recovery tests in L4. A Skald outage must not stop Heimdall task reads,
-writes, checkpoints or direct collection. A Heimdall outage must not stop Skald capture, grouping, source activation or retrieval.
+Optional read enrichment can use a published, scoped task interface. Mirror the
+owning instance, target, revision and fetch time; unavailable access leaves an
+unavailable or historical association. Local groups cannot assign obligations,
+change task ownership or widen permissions. Preserve many-to-many session/task
+links and leave ambiguous project associations explicit.
 
-No bidirectional task-status synchronization is introduced. Skald's own
-session labels and groups are independent of Heimdall assignments. Imported task
-state can be refreshed but only Heimdall's existing command paths change it. A
-future user-requested checkpoint action is a separate integration feature using
-existing authority; it is outside the initial read-only adapter.
+Direct capture and an eventual archive feed preserve source keys and revisions.
+Each destination owns its checkpoint, retained subset and removal receipts; a
+successful delivery to one sink cannot acknowledge another. Retry reconciliation
+uses source identity/revision, not timing or an exactly-once promise. Switching
+transports cannot treat an archive cursor as a native file offset. Prove replay,
+interruption, rewrite/removal, restore, outage/backfill and sink independence with
+shared fixtures before claiming the combined integration.
+
+Odin runtime enrollment and live archive integration remain I6 unless Odin and
+affected producers separately accept the proposed earlier observation pilot.
+Before that, prepare synthetic integrations. Skald's source-health and standalone
+recovery work can proceed independently; Odin availability must never gate local
+capture or browsing.
 
 ## 11. Delivery sequence and acceptance
 
@@ -816,17 +844,19 @@ Milestones are vertical slices, not estimates of elapsed calendar time. Skald mi
 | **L1: archive and two CLI sources** | Single-writer daemon; Claude Code and Codex rollout adapters; incremental backfill/tailing; revisions, gaps, checkpoints, backup/restore; CLI list/read | Restart and duplicate-delivery tests; partial-line/rotation/rewrite cases; record the configured independent non-Git/non-dotprivate backup destination and successful fresh-directory restore from it with native files absent; verify digests/checkpoints and interrupted/failed backup behavior (§6.3); archive survives native-file removal; no summarization or embedding requests; recap and opaque-compaction fixtures read correctly |
 | **L2: activity and session window** | Deterministic description selection, source health, project/group views, native recap history, optional Herdr association and source activation | TUI works in a dedicated Wayland terminal with Heimdall/Braid absent; stale locator is refused; unknown activity is not completed work; reopening the TUI loses no captured history |
 | **L3: agent retrieval** | Braid publisher, exact/lexical queries, bounded expansion/export and read-only MCP | Real pinned-Braid contract test; scoped cross-project fixture, deletion, revision conflict, unavailable backend and no-answer cases; measured context size, source citations and required provenance on every MCP response |
-| **L4: Heimdall reuse and optional enrichment** | Released capture package used by Heimdall S1; optional read enrichment; optional normalized feed after direct mode works | Both independent-service acceptance scenarios pass; shared parser fixtures pass in both repositories; feed/direct reconciliation preserves identities; native descriptions never become accepted task state |
+| **L4: shared capture reuse and optional enrichment** | Published producer boundary and consumer pins; optional external task reads and archive feed; Heimdall-specific reuse remains subject to its own roadmap and EC-13 disposition | Both independent-service acceptance scenarios pass; shared fixtures pass in each consuming repository; feed/direct reconciliation preserves identities; native descriptions never become accepted task state; EC-14 publication and relevant peer records are checked separately |
 | **L5: additional surfaces and packaging** | Capability spikes for desktop/web sources, supported export imports, installation/uninstall, capacity/retention controls, migration/recovery docs | Each advertised live source has captured record and restart evidence; unsupported surfaces remain explicit; clean install/restore and user-unit lifecycle verified |
 | **L6: optional portable preservation and project documents** | Versioned selected-session/artifact export and import; scoped dotprivate document adapter; export jobs/receipts; generic selected-files handoff when dotprivate supports it | Round-trip retains origin IDs, bytes and coverage; duplicate import and cross-project export produce no duplicate sessions; unrelated private changes remain uncommitted; failed/uncertain push recovers without new source writes; core archive works without dotprivate |
 
-L1–L2 are the standalone local product without waiting for Heimdall S1. L3 adds
-valuable retrieval; L4–L6 retain their existing integration/capability gates.
-L4's Heimdall-consuming work follows that project's roadmap; optional Skald
-enrichment can be developed independently against existing supported reads.
-The L0/L1 capture package can be consumed before L4; the first implementing
-project can publish it under the agreed contract. L4 proves the combined
-integration rather than imposing a dependency on completion of the Skald UI.
+L1–L2 remain the standalone local product without waiting for a peer runtime.
+L3 adds retrieval; L0–L6 retain their release and capability gates. The OHS
+packages organize current work but do not replace those gates. L4 consumer work
+follows each peer's accepted roadmap; no peer acceptance is implied here.
+The L0/L1 capture package can be prepared and published before full L4 integration.
+L4 proves the combined integration rather than imposing a dependency on completion
+of Skald's UI. Existing Heimdall-specific independent-service checks remain
+applicable while that consumer remains in scope; the Odin path needs its own
+published-contract, sink-independence and outage evidence.
 Export import can precede live app adapters. No milestone is considered complete
 merely because a provider's undocumented cache can be read once.
 

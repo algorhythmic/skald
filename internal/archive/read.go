@@ -62,14 +62,24 @@ type Exact struct {
 	Boundary int64                `json:"boundary"`
 }
 type SourceHealth struct {
-	Key            string  `json:"stream_key"`
-	Namespace      string  `json:"namespace"`
-	Provider       string  `json:"provider"`
-	Health         string  `json:"health"`
-	CheckedAt      *string `json:"checked_at"`
-	CapturedOffset int64   `json:"captured_offset"`
-	ParsedOffset   int64   `json:"parsed_offset"`
-	HasGaps        bool    `json:"has_gaps"`
+	Key                 string  `json:"stream_key"`
+	Namespace           string  `json:"namespace"`
+	Provider            string  `json:"provider"`
+	Enrolled            bool    `json:"enrolled"`
+	Health              string  `json:"health"`
+	CheckedAt           *string `json:"checked_at"`
+	CheckpointAvailable bool    `json:"checkpoint_available"`
+	Generation          *string `json:"stream_generation"`
+	Epoch               *int64  `json:"stream_epoch"`
+	NextOrdinal         *int64  `json:"next_ordinal"`
+	CapturedOffset      int64   `json:"captured_offset"`
+	ParsedOffset        int64   `json:"parsed_offset"`
+	HasGaps             bool    `json:"has_gaps"`
+	// These describe the record immediately before the committed checkpoint in
+	// its current generation. Checks and empty polls never refresh record age.
+	// A missing native timestamp is unknown, even if an earlier record had one.
+	LastCapturedAt *string `json:"last_captured_at"`
+	LastSourceTime *string `json:"last_source_time"`
 }
 
 func (s *Store) cursor(namespaces []string, kind, encoded string, limit int) (Cursor, error) {
@@ -327,9 +337,17 @@ func (s *Store) Health(ctx context.Context, ns []string) ([]SourceHealth, error)
 }
 func (s *Store) health(ctx context.Context, ns []string) ([]SourceHealth, error) {
 	in, args := scopeSQL(ns)
-	rows, err := s.db.QueryContext(ctx, `SELECT st.stream_key,st.namespace,src.provider,l.health,l.checked_at,coalesce(cp.captured_offset,0),coalesce(cp.parsed_offset,0),coalesce(cp.has_gaps,0)
+	rows, err := s.db.QueryContext(ctx, `SELECT st.stream_key,st.namespace,src.provider,l.active,l.health,l.checked_at,
+ cp.stream_key IS NOT NULL,cp.generation,json_extract(cp.checkpoint_json,'$.epoch'),cp.ordinal,
+ coalesce(cp.captured_offset,0),coalesce(cp.parsed_offset,0),coalesce(cp.has_gaps,0),
+ (SELECT o.observed_at FROM record_observations o
+  WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 LIMIT 1),
+ (SELECT n.source_time FROM record_observations o JOIN normalizations n
+  ON n.record_key=o.record_key AND n.source_revision=o.source_revision AND n.adapter_version=src.adapter_version
+  WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 LIMIT 1)
  FROM stream_locators l JOIN streams st USING(stream_key) JOIN sources src USING(namespace)
- LEFT JOIN ingest_checkpoints cp USING(stream_key) WHERE st.namespace IN (`+in+`) AND l.active=1 ORDER BY st.stream_key LIMIT 256`, args...)
+ LEFT JOIN ingest_checkpoints cp USING(stream_key)
+ WHERE st.namespace IN (`+in+`) AND l.active=1 ORDER BY st.stream_key LIMIT 256`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -337,12 +355,35 @@ func (s *Store) health(ctx context.Context, ns []string) ([]SourceHealth, error)
 	out := []SourceHealth{}
 	for rows.Next() {
 		var h SourceHealth
-		if err := rows.Scan(&h.Key, &h.Namespace, &h.Provider, &h.Health, &h.CheckedAt, &h.CapturedOffset, &h.ParsedOffset, &h.HasGaps); err != nil {
+		if err := rows.Scan(&h.Key, &h.Namespace, &h.Provider, &h.Enrolled, &h.Health, &h.CheckedAt, &h.CheckpointAvailable, &h.Generation, &h.Epoch, &h.NextOrdinal, &h.CapturedOffset, &h.ParsedOffset, &h.HasGaps, &h.LastCapturedAt, &h.LastSourceTime); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) Status(ctx context.Context, namespaces []string) (map[string]any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status, err := s.stats(ctx, namespaces)
+	if err != nil {
+		return nil, err
+	}
+	sources, err := s.health(ctx, namespaces)
+	if err != nil {
+		return nil, err
+	}
+	in, args := scopeSQL(namespaces)
+	var total int64
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM stream_locators l JOIN streams st USING(stream_key)
+ WHERE st.namespace IN (`+in+`) AND l.active=1`, args...).Scan(&total); err != nil {
+		return nil, err
+	}
+	status["sources"] = sources
+	status["sources_total"] = total
+	status["sources_omitted"] = total - int64(len(sources))
+	return status, nil
 }
 
 // Scope returns a requested narrowing, never a widening, of the local read corpus.

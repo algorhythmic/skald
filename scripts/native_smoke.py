@@ -63,6 +63,15 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
     try:
         proc = start(data)
         initial = wait_for(lambda s: s["record_versions"] == 17 and not s["capture_issues"])
+        assert initial["sources_total"] == 2 and initial["sources_omitted"] == 0
+        for health in initial["sources"]:
+            assert health["enrolled"] and health["checkpoint_available"]
+            assert health["stream_generation"] and health["next_ordinal"] > 0
+            assert health["last_captured_at"] and health["checked_at"]
+            assert health["captured_offset"] == health["parsed_offset"] > 0
+        denied = subprocess.run([str(BINARY), "status", "--socket", str(socket),
+                                 "--namespace", "fixture:outside"], capture_output=True, text=True, timeout=5)
+        assert denied.returncode and "scope_denied" in denied.stderr
         assert (socket.stat().st_mode & 0o777) == 0o600
         assert (data.stat().st_mode & 0o777) == 0o700
         second = subprocess.run([str(BINARY), "serve", "--config", str(config), "--data-dir", str(data),
@@ -96,6 +105,10 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
         assert resumed["archive_instance"] == initial["archive_instance"]
         time.sleep(0.25)
         assert cli("status", "--socket", socket)["record_versions"] == 18
+        source_bytes = {p.name: p.read_bytes() for p in sources.iterdir()}
+        position_fields = ("stream_generation", "stream_epoch", "next_ordinal", "captured_offset",
+                           "parsed_offset", "last_captured_at", "last_source_time")
+        captured_positions = {h["stream_key"]: {k: h[k] for k in position_fields} for h in resumed["sources"]}
         (sources / "claude.jsonl").unlink()
         (sources / "codex.jsonl").unlink()
         wait_for(lambda s: len(s["capture_issues"]) == 2)
@@ -108,11 +121,22 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
         proc = start(restored)
         state = wait_for(lambda s: s["record_versions"] == 18 and len(s["capture_issues"]) == 2)
         assert state["archive_instance"] != initial["archive_instance"]
+        assert state["sources_total"] == 2 and state["sources_omitted"] == 0
+        for health in state["sources"]:
+            assert health["health"] == "unavailable" and health["checkpoint_available"]
+            assert {k: health[k] for k in position_fields} == captured_positions[health["stream_key"]]
         assert read_recap()["raw"] == original["raw"]
+        for name, raw in source_bytes.items():
+            (sources / name).write_bytes(raw)
+        recovered = wait_for(lambda s: not s["capture_issues"] and
+                             all(h["health"] == "available" for h in s["sources"]))
+        assert recovered["record_versions"] == 18
+        for health in recovered["sources"]:
+            assert {k: health[k] for k in position_fields} == captured_positions[health["stream_key"]]
         proc.terminate()
         assert proc.wait(timeout=10) == 0
         assert not socket.exists()
-        print("Native daemon: private socket, two providers, exclusive writer, pending tail, SIGKILL/restart, duplicate-free capture, source removal, exact raw reads, backup, fresh restore and clean shutdown pass")
+        print("Native daemon: scoped source positions/freshness, two providers, private socket, exclusive writer, pending tail, SIGKILL/restart, duplicate-free capture, source loss/reappearance, exact raw reads, backup, fresh restore and clean shutdown pass")
     finally:
         for proc in processes:
             if proc.poll() is None:

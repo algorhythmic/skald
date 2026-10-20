@@ -1,0 +1,89 @@
+{
+  "version": 1,
+  "batch_id": "sr1:capture-batch:a499a2a1964bfc9b1fafc036341b39c39a4f4a47cb16228c4d29dbc95ba8a958",
+  "source": {
+    "namespace": "fixture:capture-delivery",
+    "provider": "claude_code",
+    "stream_id": "synthetic-stream-1"
+  },
+  "previous": {
+    "version": 0,
+    "source_key": "",
+    "generation": "",
+    "epoch": 0,
+    "offset": 0,
+    "parsed_offset": 0,
+    "ordinal": 0,
+    "prefix_digest": "",
+    "conversation_id": "",
+    "provider_version": "",
+    "has_gaps": false
+  },
+  "batch": {
+    "records": [
+      {
+        "record": {
+          "contract_version": 1,
+          "source_namespace": "fixture:capture-delivery",
+          "origin_scope": {
+            "kind": "conversation",
+            "key": "sr1:conversation:5550ef36e219ccbaa073aeb7120ebc905b4edc0338f4181b456d8d28e9f2902a"
+          },
+          "conversation_key": "sr1:conversation:5550ef36e219ccbaa073aeb7120ebc905b4edc0338f4181b456d8d28e9f2902a",
+          "record_key": "sr1:record:bd97160ac27a2901a5601a7998d0d0863ffe4a5a58d56d48cdcbf6f780988c64",
+          "source_revision": "sha256:b7aec4f5d67228fbb591d768315fde48b47bb4718926dca751d20d047edfe8e2",
+          "provider": "claude_code",
+          "provider_version": "fixture-v1",
+          "adapter_version": "jsonl-v1.0.0",
+          "kind": "message",
+          "native_kind": "user",
+          "role": "user",
+          "channel": null,
+          "source_time": null,
+          "source_order": {
+            "stream_generation": "sr1:generation:7f7f4d5bcacc8d0035aea10652f1703c66f82c881640a129b62b17133f0e97c7",
+            "ordinal": 0
+          },
+          "observed_at": "2026-10-19T00:00:00Z",
+          "body": {
+            "text": "Synthetic capture delivery evidence."
+          },
+          "raw_ref": {
+            "record_key": "sr1:record:bd97160ac27a2901a5601a7998d0d0863ffe4a5a58d56d48cdcbf6f780988c64",
+            "source_revision": "sha256:b7aec4f5d67228fbb591d768315fde48b47bb4718926dca751d20d047edfe8e2"
+          },
+          "coverage": {
+            "kind": "unknown"
+          },
+          "provenance": {
+            "kind": "native",
+            "producer": "claude_code"
+          },
+          "relations": [],
+          "availability": {
+            "state": "available"
+          }
+        },
+        "raw": "eyJ0eXBlIjoidXNlciIsInV1aWQiOiJzeW50aGV0aWMtbWVzc2FnZS0xIiwic2Vzc2lvbklkIjoic3ludGhldGljLWRlbGl2ZXJ5IiwidmVyc2lvbiI6ImZpeHR1cmUtdjEiLCJtZXNzYWdlIjp7InJvbGUiOiJ1c2VyIiwiY29udGVudCI6IlN5bnRoZXRpYyBjYXB0dXJlIGRlbGl2ZXJ5IGV2aWRlbmNlLiJ9fQo="
+      }
+    ],
+    "gaps": [],
+    "checkpoint": {
+      "version": 1,
+      "source_key": "sr1:stream:c71f44764a1eeea486d91f0923acfb1cebfbe03e355bd79d014f39343cf22973",
+      "generation": "sr1:generation:7f7f4d5bcacc8d0035aea10652f1703c66f82c881640a129b62b17133f0e97c7",
+      "epoch": 0,
+      "offset": 176,
+      "parsed_offset": 176,
+      "ordinal": 1,
+      "prefix_digest": "sha256:b7aec4f5d67228fbb591d768315fde48b47bb4718926dca751d20d047edfe8e2",
+      "conversation_id": "synthetic-delivery",
+      "provider_version": "fixture-v1",
+      "has_gaps": false
+    },
+    "pending_partial_line": false,
+    "more": false,
+    "blocked": false,
+    "source_active_at": "0001-01-01T00:00:00Z"
+  }
+}

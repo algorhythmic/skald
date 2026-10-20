@@ -1,0 +1,33 @@
+{
+  "description": "Synthetic producer/consumer scenarios; apply each case in a fresh registered archive. The seed operation accepts the named delivery before the test operation. Never use real histories.",
+  "cases": [
+    {
+      "name": "accepted",
+      "delivery": "accepted-v1.json",
+      "seed": false,
+      "interrupt_checkpoint": false,
+      "expected": "acknowledged"
+    },
+    {
+      "name": "interrupted_acceptance",
+      "delivery": "accepted-v1.json",
+      "seed": false,
+      "interrupt_checkpoint": true,
+      "expected": "rolled_back_without_acknowledgement"
+    },
+    {
+      "name": "stale_checkpoint_after_lost_response",
+      "delivery": "accepted-v1.json",
+      "seed": true,
+      "interrupt_checkpoint": false,
+      "expected": "checkpoint_conflict_without_acknowledgement"
+    },
+    {
+      "name": "unsupported_version",
+      "delivery": "unsupported-v2.json",
+      "seed": false,
+      "interrupt_checkpoint": false,
+      "expected": "unsupported_delivery_version"
+    }
+  ]
+}

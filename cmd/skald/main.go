@@ -15,6 +15,7 @@ import (
 	"unicode"
 	"unicode/utf16"
 
+	"github.com/algorhythmic/skald/internal/archive"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
@@ -74,7 +75,7 @@ func run(args []string, out, stderr io.Writer) error {
 		if len(args) != 1 {
 			return errors.New("unexpected_arguments")
 		}
-		_, err := fmt.Fprintln(out, "skald 0.1.0-dev · sessionrecord v1 · archive schema 4")
+		_, err := fmt.Fprintf(out, "skald 0.1.0-dev · sessionrecord v1 · archive schema %d\n", archive.SchemaVersion)
 		return err
 	}
 	if args[0] == "sources" || args[0] == "connect" {

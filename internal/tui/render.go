@@ -653,8 +653,15 @@ func (m *model) drawReference(screen tcell.Screen) {
 }
 
 func (m *model) drawDiagnostics(screen tcell.Screen) {
+	m.overlay(screen, "archive / source diagnostics", m.diagnosticLines(time.Now()))
+}
+
+func (m *model) diagnosticLines(now time.Time) []string {
 	s := m.snapshot.Status
-	lines := []string{"Theme: " + string(m.palette.theme), fmt.Sprintf("Archive boundary: %d · instance: %s", s.Boundary, s.Instance), "", "Capture health is independent of conversation activity. No verified live surfaces are connected.", ""}
+	lines := []string{"Theme: " + string(m.palette.theme), fmt.Sprintf("Archive boundary: %d · instance: %s", s.Boundary, s.Instance), "", "Capture health and record age do not establish live presence or task completion. No verified live surfaces are connected.", ""}
+	if s.SourcesOmitted > 0 {
+		lines = append(lines, fmt.Sprintf("Showing %d of %d enrolled streams · %d omitted by the status limit", len(s.Sources), s.SourcesTotal, s.SourcesOmitted), "")
+	}
 	for _, root := range s.Discovery {
 		cutoff := root.ModifiedSince
 		if cutoff == "" || strings.HasPrefix(cutoff, "0001-") {
@@ -673,10 +680,20 @@ func (m *model) drawDiagnostics(screen tcell.Screen) {
 		lines = append(lines, "")
 	}
 	for _, source := range s.Sources {
-		lines = append(lines, source.Namespace+" / "+source.Provider+" · "+source.Health, "Stream: "+source.Key, fmt.Sprintf("Captured %d bytes · parsed %d bytes · continuity gaps: %t", source.CapturedOffset, source.ParsedOffset, source.HasGaps))
-		if source.CheckedAt != nil {
-			lines = append(lines, "Source checked: "+*source.CheckedAt)
+		lines = append(lines, source.Namespace+" / "+source.Provider+" · "+source.Health, "Stream: "+source.Key)
+		if source.Enrolled {
+			lines = append(lines, "Enrollment: enrolled")
 		}
+		if source.CheckpointAvailable && source.Generation != nil && source.Epoch != nil && source.NextOrdinal != nil {
+			generation := *source.Generation
+			if generation == "" {
+				generation = "none yet"
+			}
+			lines = append(lines, fmt.Sprintf("Checkpoint: epoch %d · next ordinal %d · generation %s", *source.Epoch, *source.NextOrdinal, generation), fmt.Sprintf("Captured %d bytes · parsed %d bytes · continuity gaps: %t", source.CapturedOffset, source.ParsedOffset, source.HasGaps))
+		} else {
+			lines = append(lines, "Checkpoint: unavailable · capture position unknown")
+		}
+		lines = append(lines, "Source checked: "+diagnosticTime(source.CheckedAt, now), "Last captured record: "+diagnosticTime(source.LastCapturedAt, now), "Latest record source time: "+diagnosticTime(source.LastSourceTime, now))
 		if issue := s.Issues[source.Key]; issue != "" {
 			lines = append(lines, "Capture issue: "+issue)
 		}
@@ -685,5 +702,31 @@ func (m *model) drawDiagnostics(screen tcell.Screen) {
 	if len(s.Sources) == 0 {
 		lines = append(lines, "No source health is currently available.")
 	}
-	m.overlay(screen, "archive / source diagnostics", lines)
+	return lines
+}
+
+func diagnosticTime(value *string, now time.Time) string {
+	if value == nil {
+		return "unknown"
+	}
+	at, err := time.Parse(time.RFC3339Nano, *value)
+	if err != nil || at.IsZero() {
+		return "unknown"
+	}
+	age := now.Sub(at)
+	if age < 0 {
+		return *value + " (age unknown: clock ahead)"
+	}
+	var elapsed string
+	switch {
+	case age < time.Minute:
+		elapsed = "<1m"
+	case age < time.Hour:
+		elapsed = fmt.Sprintf("%dm", int(age.Minutes()))
+	case age < 24*time.Hour:
+		elapsed = fmt.Sprintf("%dh", int(age.Hours()))
+	default:
+		elapsed = fmt.Sprintf("%dd", int(age.Hours()/24))
+	}
+	return *value + " (" + elapsed + " ago)"
 }
