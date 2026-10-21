@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "fixture": "../capture-delivery/accepted-v1.json",
+  "scenarios": [
+    {
+      "name": "restart_with_independent_receipts",
+      "destinations": ["archive", "peer"],
+      "steps": ["enqueue", "archive_ack", "restart", "peer_ack"],
+      "expected": "producer and archive progress survive restart; peer remains pending until its own receipt; envelope prunes after both receipts"
+    },
+    {
+      "name": "lost_receipt",
+      "destinations": ["archive"],
+      "steps": ["enqueue", "sink_commits_then_returns_error", "restart", "retry_same_batch_id", "sink_returns_durable_receipt"],
+      "expected": "spool does not acknowledge an uncertain result and retry preserves batch identity"
+    },
+    {
+      "name": "capacity_and_registry",
+      "destinations": ["archive", "peer"],
+      "steps": ["fill_pending_limit", "enqueue_another", "reopen_with_changed_registry"],
+      "expected": "capacity refuses advancement and changed destination registry refuses open"
+    },
+    {
+      "name": "source_failure_isolation",
+      "destinations": ["archive"],
+      "steps": ["source_a_fails", "source_a_second_waits", "source_b_acknowledges"],
+      "expected": "source order holds while unrelated source can progress"
+    }
+  ]
+}

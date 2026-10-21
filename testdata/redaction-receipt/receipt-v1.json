@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "archive_instance": "synthetic-instance-01",
+  "namespace": "fixture:source",
+  "scope_kind": "conversation",
+  "scope_key": "sr1:conversation:synthetic",
+  "target": "sr1:conversation:synthetic",
+  "sequence": 17,
+  "records_removed": 3,
+  "versions_removed": 4,
+  "objects_removed": 3,
+  "bytes_removed": 352,
+  "redacted_at": "2026-10-21T00:00:00Z"
+}

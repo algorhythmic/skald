@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/algorhythmic/skald/schemas/redaction-receipt-v1.schema.json",
+  "title": "Skald content redaction receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "archive_instance",
+    "namespace",
+    "scope_kind",
+    "scope_key",
+    "target",
+    "sequence",
+    "records_removed",
+    "versions_removed",
+    "objects_removed",
+    "bytes_removed",
+    "redacted_at"
+  ],
+  "properties": {
+    "version": { "const": 1 },
+    "archive_instance": { "type": "string", "minLength": 1 },
+    "namespace": { "type": "string", "minLength": 1 },
+    "scope_kind": { "enum": ["source", "conversation", "record"] },
+    "scope_key": { "type": "string", "minLength": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "records_removed": { "type": "integer", "minimum": 0 },
+    "versions_removed": { "type": "integer", "minimum": 0 },
+    "objects_removed": { "type": "integer", "minimum": 0 },
+    "bytes_removed": { "type": "integer", "minimum": 0 },
+    "redacted_at": { "type": "string", "format": "date-time" }
+  }
+}

@@ -126,6 +126,8 @@ func Identify(ctx context.Context, root, path, provider string) (Identity, error
 	}
 	reader := bufio.NewReaderSize(io.LimitReader(f, 4<<20), 64<<10)
 	shape := false
+	probeBytes := int64(0)
+	probeRecords := 0
 	for n := 0; n < 256; n++ {
 		if ctx.Err() != nil {
 			return out, ctx.Err()
@@ -137,9 +139,11 @@ func Identify(ctx context.Context, root, path, provider string) (Identity, error
 		if oversized {
 			return out, errors.New("identity_probe_limit")
 		}
+		probeBytes += int64(len(line))
 		if !complete {
 			break
 		}
+		probeRecords++
 		var native object
 		if json.Unmarshal(line, &native) != nil || native == nil {
 			continue
@@ -178,14 +182,24 @@ func Identify(ctx context.Context, root, path, provider string) (Identity, error
 		}
 	}
 	after, err := dir.Lstat(path)
-	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
+	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) ||
+		before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) || !sameChangeTime(before, after) {
 		return out, errors.New("source_replaced_during_read")
 	}
 	if out.ConversationID == "" || !shape {
+		if before.Size() > probeBytes && (probeRecords == 256 || probeBytes >= 4<<20) {
+			return out, errors.New("identity_probe_limit")
+		}
 		return out, errors.New("conversation_identity_unavailable")
 	}
 	if len(out.ConversationID) > 256 || len(out.ProviderVersion) > 128 || len(out.Project) > 4096 || len(out.Originator) > 256 {
 		return out, errors.New("identity_metadata_too_large")
 	}
 	return out, nil
+}
+
+func sameChangeTime(a, b os.FileInfo) bool {
+	sa, aok := a.Sys().(*syscall.Stat_t)
+	sb, bok := b.Sys().(*syscall.Stat_t)
+	return aok && bok && sa.Ctim == sb.Ctim
 }

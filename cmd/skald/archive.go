@@ -19,7 +19,7 @@ import (
 
 func isArchiveCommand(cmd string) bool {
 	switch cmd {
-	case "serve", "status", "sessions", "artifacts", "get", "backup", "restore":
+	case "serve", "status", "sessions", "artifacts", "get", "backup", "restore", "changes", "capabilities", "redact":
 		return true
 	}
 	return false
@@ -39,6 +39,8 @@ func runArchive(args []string, out, stderr io.Writer) error {
 	adapter := f.String("adapter", "", "exact normalization version")
 	raw := f.Bool("raw", false, "request source bytes; requires allow_raw in daemon config")
 	backup := f.String("backup", "", "verified archive backup file")
+	redactionScope := f.String("scope", "", "removal scope: source, conversation, or record")
+	target := f.String("target", "", "namespace, conversation key, or record key to redact")
 	if err := f.Parse(args[1:]); err != nil {
 		if err == flag.ErrHelp {
 			return nil
@@ -49,12 +51,15 @@ func runArchive(args []string, out, stderr io.Writer) error {
 		return errors.New("unexpected_arguments")
 	}
 	allowed := map[string]map[string]bool{
-		"serve":     {"config": true, "data-dir": true, "socket": true},
-		"status":    {"socket": true, "namespace": true},
-		"sessions":  {"socket": true, "namespace": true, "limit": true, "cursor": true},
-		"artifacts": {"socket": true, "namespace": true, "limit": true, "cursor": true, "conversation": true},
-		"get":       {"socket": true, "namespace": true, "record": true, "revision": true, "adapter": true, "raw": true},
-		"backup":    {"socket": true}, "restore": {"backup": true, "data-dir": true},
+		"serve":        {"config": true, "data-dir": true, "socket": true},
+		"status":       {"socket": true, "namespace": true},
+		"capabilities": {"socket": true, "namespace": true},
+		"changes":      {"socket": true, "namespace": true, "limit": true, "cursor": true},
+		"redact":       {"socket": true, "namespace": true, "scope": true, "target": true},
+		"sessions":     {"socket": true, "namespace": true, "limit": true, "cursor": true},
+		"artifacts":    {"socket": true, "namespace": true, "limit": true, "cursor": true, "conversation": true},
+		"get":          {"socket": true, "namespace": true, "record": true, "revision": true, "adapter": true, "raw": true},
+		"backup":       {"socket": true}, "restore": {"backup": true, "data-dir": true},
 	}
 	invalid := false
 	f.Visit(func(v *flag.Flag) {
@@ -116,7 +121,7 @@ func runArchive(args []string, out, stderr io.Writer) error {
 	endpoint := "/v1/" + args[0]
 	method := "GET"
 	switch args[0] {
-	case "sessions", "artifacts":
+	case "sessions", "artifacts", "changes":
 		q.Set("limit", strconv.Itoa(*limit))
 		if *cursor != "" {
 			q.Set("cursor", *cursor)
@@ -141,6 +146,14 @@ func runArchive(args []string, out, stderr io.Writer) error {
 	case "backup":
 		endpoint = "/manage/backup"
 		method = "POST"
+	case "redact":
+		if *ns == "" || *redactionScope == "" || *target == "" {
+			return errors.New("namespace_scope_and_target_required")
+		}
+		endpoint = "/manage/redact"
+		method = "POST"
+		q.Set("scope", *redactionScope)
+		q.Set("target", *target)
 	}
 	response, err := request(ctx, *socket, method, endpoint, q)
 	if err != nil {

@@ -19,6 +19,9 @@ type Capabilities struct {
 	Evidence          string     `json:"evidence"`
 	OrdinaryContent   Capability `json:"ordinary_content"`
 	NativeRecap       Capability `json:"native_recap"`
+	NativeSubagents   Capability `json:"native_subagents"`
+	NativeForks       Capability `json:"native_forks"`
+	ConversationAlias Capability `json:"conversation_alias"`
 	LiveCollection    Capability `json:"live_collection"`
 	SurfaceActivation Capability `json:"surface_activation"`
 }
@@ -31,6 +34,9 @@ func Probe(provider, version string) Capabilities {
 	c := Capabilities{Provider: provider, ProviderVersion: version, AdapterVersion: AdapterVersion,
 		Evidence:        "synthetic schema fixtures; September 9 source-shape audit",
 		OrdinaryContent: unknown, NativeRecap: unknown,
+		NativeSubagents:   Capability{State: "unsupported", Reason: "subagent_identity_contract_not_implemented"},
+		NativeForks:       Capability{State: "unsupported", Reason: "fork_relation_contract_not_implemented"},
+		ConversationAlias: Capability{State: "unsupported", Reason: "conversation_alias_contract_not_implemented"},
 		LiveCollection:    Capability{State: "unknown", Reason: "configured_file_collector_requires_source_verification"},
 		SurfaceActivation: Capability{State: "unsupported", Reason: "surface_adapter_not_implemented"}}
 	if provider == Claude && version == "2.1.263" {
@@ -42,6 +48,7 @@ func Probe(provider, version string) Capabilities {
 		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "codex_response_item"}
 		c.NativeRecap = Capability{State: "unsupported", Reason: "native_tui_recap_not_persisted"}
 		c.LiveCollection = Capability{State: "fixture_verified", Reason: "configured_file_tail_and_restart_tests"}
+		c.NativeForks = Capability{State: "fixture_verified", Reason: "session_meta_parent_extension; relationship_projection_unavailable"}
 	}
 	if provider == Devin {
 		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "acp_messages_table"}
@@ -75,10 +82,16 @@ func Discover(root string, limit int) ([]string, error) {
 		if err != nil {
 			return err
 		}
-		if e.Type()&fs.ModeSymlink != 0 || e.IsDir() {
+		if e.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".jsonl") {
+		if e.IsDir() {
+			if e.Name() == "subagents" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if e.Type().IsRegular() && strings.HasSuffix(e.Name(), ".jsonl") && !strings.HasPrefix(e.Name(), "agent-") {
 			if len(paths) == limit {
 				return errors.New("discovery_limit_exceeded")
 			}

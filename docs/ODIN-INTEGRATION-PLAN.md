@@ -1,8 +1,9 @@
 # Skald producer integration plan
 
-Prepared 2026-10-19 for the first Skald implementation batch of the proposed
-Odin–Heimdall–Skald work plan. This is Skald-owned implementation scope and a
-publication checklist, not a peer decision, release receipt or live cutover.
+Prepared 2026-10-19 and updated 2026-10-21 for Skald's producer batches under
+the proposed Odin–Heimdall–Skald work plan. This is Skald-owned implementation
+scope and a publication checklist, not a peer decision, release receipt or live
+cutover.
 [STATUS.md](../STATUS.md) records verified implementation and remaining gates.
 
 The source plan was read from
@@ -43,8 +44,18 @@ implementation and test receipts separately from publication and peer acceptance
 | Work package | Skald change | First-batch evidence and limit |
 | --- | --- | --- |
 | OHS-02: useful source visibility | Expose enrollment, capture/parse position, observation time and source age, failures and unavailable reasons in status and the TUI using metadata already owned by Skald | Synthetic Claude Code and Codex loss/reappearance and restart checks, plus browsing with peers absent; capture age is not live presence. Live enrollment and one attributable captured change per selected provider still need a separate receipt. |
-| OHS-03: producer capture boundary | Add a versioned delivery envelope and public collector/sink boundary around existing normalized batches; preserve the record-v1 identity contract and the local archive adapter | Machine-readable schema, shared synthetic fixture, unsupported-version refusal, stable replay identity, interrupted delivery and checkpoint atomicity checks. This prepares EC-14; it does not publish a new release or an archive changes API. |
-| OHS-07: prepare independent destinations | Exercise the public boundary against a standalone archive sink and a synthetic consumer | Show that sink failure leaves its checkpoint unacknowledged and a retry remains attributable. A durable workstation spool, multiple destination acknowledgement state, historical archive ingestion and live Odin integration remain later work. |
+| OHS-03: producer capture boundary | Versioned delivery envelope, public collector/sink boundary, archive metadata feed and content removal receipt around record-v1 identity | Local schemas and synthetic fixtures cover version refusal, cursor scope/restore expiry, correction/removal/redaction, exact locators, receipt rollback and replay. The candidate [contract manifest](PRODUCER-CONTRACT-MANIFEST.json) gives reproducible fixture/schema digests; it is not a published release or Odin pin. |
+| OHS-07: prepare independent destinations | Standalone archive sink stores durable destination receipts; a private capture spool persists envelopes, producer progress and independent destination acknowledgements | Synthetic restart, sink failure, capacity, replay and backup/restore checks exercise the local boundary. Live Odin delivery, historical overlap reconciliation and per-destination removal acknowledgement remain external gates. |
+
+OHS-02 capture hardening rejects Claude sidechains even in a manually registered
+primary stream, labels bounded identity probe exhaustion, and checks probe file
+stability. Devin store reads now validate selected paths, encode SQLite URIs and
+dump under a read-only transaction with a bounded output size. A synthetic
+8,192-record, 8.9 MiB backfill benchmark on an i5-8600K measured about 887 ms
+at 256 records per batch and 500 ms at 512 records per batch (three iterations
+each). The default is now 512 records, with the same 4 MiB line and 16 MiB batch
+byte caps and full-prefix rewrite checks. This is local synthetic evidence, not
+a live-source throughput claim or closure of L1 scale gates.
 
 Run the repository checks for the selected revision (`make check`, build and
 relevant synthetic smoke/recovery checks). Record commands, results, revision and
@@ -63,25 +74,31 @@ conversation text into the repository.
 ## EC-14 publication and consumer checklist
 
 The public record and checkpoint contract is documented in
-[CONTRACT-V1.md](CONTRACT-V1.md); the first local delivery boundary is specified
-in [CAPTURE-DELIVERY-V1.md](CAPTURE-DELIVERY-V1.md). The following are separate deliverables; an
-internal table or untagged package is not evidence that the corresponding
-consumer interface is published.
+[CONTRACT-V1.md](CONTRACT-V1.md). Local producer contracts now include
+[capture delivery](CAPTURE-DELIVERY-V1.md), [archive feed](ARCHIVE-FEED-V1.md),
+[capture spool](CAPTURE-SPOOL-V1.md) and [content removal](CONTENT-REMOVAL-V1.md).
+The [producer candidate](PRODUCER-RELEASE-CANDIDATE.md) tracks local publication
+evidence and remaining release checks.
+The following remain separate deliverables; local code and an untagged manifest
+do not establish a published consumer interface.
 
 | Deliverable | Required evidence / next action |
 | --- | --- |
 | Capture delivery contract | Review the first-batch envelope, sink semantics, schema and fixture. Specify batch/source identity, source revision, candidate checkpoint, gap semantics, ordering scope and unsupported-version behavior. Keep source identities distinct from transport delivery IDs. |
 | Public collector and discovery | Identify which capture/discovery operations are public and which daemon enrollment/registry behavior remains internal. Reuse existing parsers; publish only the surface needed by the consumer. |
 | Stable source namespace | Agree nonsecret host/source identity and preserve existing configured namespaces and logical stream tokens. Resolve hostname versus machine-derived namespace differences with explicit mapping/migration evidence; never silently rekey an existing archive or expose raw host identifiers in fixtures. |
-| Archive changes reader | Publish a scoped, bounded snapshot-plus-change interface, schema and shared fixtures. Bind cursor to archive instance, scope and high-water boundary; define restore/cursor invalidation, correction/removal/redaction and exact revision locators. Do not expose an internal SQLite path/table as the interface. |
-| Durable workstation delivery | Define spool ownership and atomic persistence of records, originals, gaps and checkpoint. Prove interruption/restart, stable batch identity, backpressure, replay and outage/backfill. Retain a single writer per destination namespace. |
-| Destination isolation | Persist acknowledgements independently for each destination. One sink's success cannot advance another sink's checkpoint. Deduplicate by source identity/revision without promising exactly-once delivery. Retention and removal receipts remain destination-specific. |
+| Archive changes reader | Local `Store.Changes`, versioned schema and fixtures implement scoped bounded snapshot-plus-tail metadata with restore/scope invalidation, correction/removal/redaction and exact revision locators. Publish and pin this interface, then run the same fixtures in Odin. Never expose an internal SQLite table as the contract. |
+| Durable workstation delivery | The local spool atomically persists envelopes and producer progress, enforces capacity and tracks replay across restart. A source's spool checkpoint can lead every sink; test live outage/backfill and any historical overlap with Odin before claiming end-to-end delivery. |
+| Destination isolation | Local archive receipts and spool acknowledgements are destination-bound. One sink's success cannot advance another sink. Define and test destination-specific retention/removal acknowledgement with the consumer; no exactly-once promise. |
 | Producer publication | Choose and publish a release after the checks pass. Record the immutable release revision, contract/schema versions, fixture digests and supported capabilities, including explicitly unavailable features. Preserve the standalone archive and browser evidence. |
 | Consumer pins and G-10 record | Odin records the exact published module/release and contract/fixture pins, runs the same fixtures and records its own compatibility result. Each affected peer records its part; this document alone does not close G-10. |
 
-The inspected Skald working baseline was `22114dd`. Local tags `v0.1.0` and
+The first inspected Skald working baseline was `22114dd`; this candidate work
+started from `f7126c7`. Local tags `v0.1.0` and
 `v0.1.1` were present during preparation; no remote publication or Odin consumer
-pin was verified here. Reconcile the release actually containing each interface
+pin was verified here. The candidate manifest records only working-tree bundle
+digests; run `python3 scripts/release_manifest.py --check` after changes settle
+and record the immutable Git revision and published tag separately. Reconcile the release actually containing each interface
 against the selected consumer pin before declaring compatibility. Do not infer
 EC-14 completion from the older status text naming `v0.1.0`.
 

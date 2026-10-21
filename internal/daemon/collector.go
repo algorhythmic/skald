@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/algorhythmic/skald/capturespool"
 	"github.com/algorhythmic/skald/internal/archive"
 	"github.com/algorhythmic/skald/sessioncapture"
 )
@@ -23,6 +24,7 @@ type Collector struct {
 	verified        map[string]verifiedFile
 	devinWal        map[string]walTick
 	Store           *archive.Store
+	Spool           *capturespool.Spool
 	Config          Config
 	mu              sync.Mutex
 	issues          map[string]string
@@ -58,14 +60,22 @@ func (c *Collector) Scan(ctx context.Context) bool {
 	c.scanMu.Lock()
 	defer c.scanMu.Unlock()
 	c.discover(ctx)
+	// Retry already captured envelopes even when the native source is offline.
+	if c.Spool != nil {
+		_, _ = c.Spool.Deliver(ctx, collectorSink{c}, 256)
+	}
 	more := false
 	for _, source := range c.Sources() {
 		if ctx.Err() != nil {
 			return false
 		}
-		cp, err := c.Store.Checkpoint(ctx, source.Key())
+		cp, err := c.captureCheckpoint(ctx, source)
 		if err != nil {
-			c.issue(source.Key(), "checkpoint_read_failed")
+			code := "checkpoint_read_failed"
+			if err.Error() == "capture_destination_checkpoint_mismatch" {
+				code = "capture_destination_checkpoint_mismatch"
+			}
+			c.issue(source.Key(), code)
 			continue
 		}
 
@@ -98,7 +108,16 @@ func (c *Collector) Scan(ctx context.Context) bool {
 					t.count, t.maxPos = count, maxPos
 				}
 				c.devinWal[source.Key()] = t
-				batch = sessioncapture.Batch{Records: []sessioncapture.Captured{}, Gaps: []sessioncapture.Gap{}, Checkpoint: cp, Pending: true, SourceActive: t.active, SourceActiveAt: walAt}
+				candidate := cp
+				if candidate.Version == 0 {
+					initial, e := sessioncapture.Read(bytes.NewReader(nil), source.Source, cp, sessioncapture.DefaultLimits(), time.Now())
+					if e != nil {
+						c.issue(source.Key(), "checkpoint_read_failed")
+						continue
+					}
+					candidate = initial.Checkpoint
+				}
+				batch = sessioncapture.Batch{Records: []sessioncapture.Captured{}, Gaps: []sessioncapture.Gap{}, Checkpoint: candidate, Pending: true, SourceActive: t.active, SourceActiveAt: walAt}
 			} else if t, ok := c.devinWal[source.Key()]; ok && t.active {
 				// Quiet again: a later bookkeeping touch must not read as a
 				// continuation of an earlier live streak.
@@ -122,11 +141,14 @@ func (c *Collector) Scan(ctx context.Context) bool {
 		}
 		if err := c.acceptCapture(ctx, source, cp, batch); err != nil {
 			code := "archive_write_failed"
-			if errors.Is(err, archive.ErrCapacity) {
+			if errors.Is(err, archive.ErrCapacity) || errors.Is(err, capturespool.ErrCapacity) {
 				code = "capture_capacity_limit"
 			}
 			if err.Error() == "capture_suppressed" {
 				code = "capture_suppressed"
+			}
+			if err.Error() == "capture_delivery_pending" {
+				code = "capture_delivery_pending"
 			}
 			c.issue(source.Key(), code)
 			_ = c.Store.SetHealth(ctx, source, "blocked", time.Now())
@@ -155,15 +177,31 @@ func (c *Collector) Scan(ctx context.Context) bool {
 	return more
 }
 
-// The standalone archive consumes the same boundary as a future workstation
-// destination. Its checkpoint is read from that archive on the next scan; this
-// local destination name is not an acknowledgement for any peer or remote sink.
+// A producer checkpoint advances when the immutable envelope reaches the spool.
+// The standalone archive acknowledges independently after committing its data.
 func (c *Collector) acceptCapture(ctx context.Context, source archive.Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch) error {
 	delivery, err := sessioncapture.NewDelivery(source.Source, previous, batch)
 	if err != nil {
 		return err
 	}
-	sink, err := c.Store.CaptureSink("skald:standalone-archive", source)
+	if c.Spool != nil {
+		if err := c.Store.CheckCapture(ctx, source, batch); err != nil {
+			return err
+		}
+		if err := c.Spool.Enqueue(delivery, []string{localDestination}); err != nil {
+			return err
+		}
+		_, _ = c.Spool.Deliver(ctx, collectorSink{c}, 256)
+		accepted, err := c.Spool.Acknowledged(delivery.BatchID, localDestination)
+		if err != nil {
+			return err
+		}
+		if !accepted {
+			return errors.New("capture_delivery_pending")
+		}
+		return nil
+	}
+	sink, err := c.Store.CaptureSink(localDestination, source)
 	if err != nil {
 		return err
 	}

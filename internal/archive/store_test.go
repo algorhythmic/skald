@@ -685,8 +685,8 @@ func TestSchemaFourUpgradeAllowsContinuation(t *testing.T) {
 	}
 	defer s.Close()
 	var version int
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
-		t.Fatal("schema-5 migration did not apply", err, version)
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
+		t.Fatal("current schema migration did not apply", err, version)
 	}
 	// The v4 CHECK rejected 'continuation'; after the rebuild it must insert.
 	digest := "sha256:" + strings.Repeat("a", 64)
@@ -706,5 +706,64 @@ func TestSchemaFourUpgradeAllowsContinuation(t *testing.T) {
 	if _, err := s.db.Exec(`INSERT INTO session_titles(conversation_key,record_key,source_revision,adapter_version,title,stream_key,epoch,ordinal,origin)
  VALUES ('sr1:conversation:x','sr1:record:x','` + digest + `','test','Continuation of work','sr1:stream:x',0,0,'continuation')`); err != nil {
 		t.Fatal("continuation origin still rejected", err)
+	}
+}
+
+func TestSchemaFiveUpgradePreservesBackupAndCreatesReceipts(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data")
+	if err := privateDir(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "archive.sqlite")
+	if err := regularPrivate(path); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", DSN(path, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"migrations/001_capture.sql", "migrations/002_daemon.sql", "migrations/003_titles.sql", "migrations/004_activity.sql", "migrations/005_continuation.sql"} {
+		ddl, err := migrations.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(string(ddl)); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	if _, err := db.Exec("INSERT INTO archive_meta VALUES (1,5,'pre-six-instance',1,NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dir, DefaultOptions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != SchemaVersion {
+		t.Fatalf("upgrade version %d %v", version, err)
+	}
+	var instance string
+	if err := s.db.QueryRow("SELECT archive_instance FROM archive_meta").Scan(&instance); err != nil || instance != "pre-six-instance" {
+		t.Fatalf("instance %q %v", instance, err)
+	}
+	var count int
+	if err := s.db.QueryRow("SELECT count(*) FROM capture_receipts").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("receipt table %d %v", count, err)
+	}
+	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-6-*.sqlite"))
+	if err != nil || len(backups) != 1 {
+		t.Fatalf("backup %v %v", backups, err)
+	}
+	backup, err := sql.Open("sqlite", DSN(backups[0], true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backup.Close()
+	if err := backup.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 5 {
+		t.Fatalf("pre-six backup version %d %v", version, err)
 	}
 }

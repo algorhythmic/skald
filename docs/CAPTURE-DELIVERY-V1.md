@@ -79,22 +79,19 @@ destination cannot advance another destination. Registration, destination names,
 reader authorization and writer ownership are caller/sink responsibilities;
 a valid hash alone conveys no authority.
 
-The standalone adapter calls existing `Ingest`. Its compare-and-swap check
-requires the stored checkpoint to equal `Delivery.Previous`. Any failure before
-commit rolls back records, gaps and checkpoint. A lost response after commit
-is uncertain acceptance from the producer's perspective. Retrying an advancing
-batch with its old previous checkpoint fails with `archive.ErrCheckpoint`;
-the adapter does not manufacture a receipt merely because the stored checkpoint
-matches the candidate. Empty batches whose checkpoint does not advance may be
-accepted repeatedly under the existing archive transaction semantics.
+The standalone adapter requires the stored checkpoint to equal
+`Delivery.Previous` on first acceptance. It commits records, gaps, checkpoint
+and a destination-bound receipt in the same transaction. Any failure before
+commit rolls them all back. If the response is lost after commit, retrying the
+same immutable envelope returns its stored receipt. A different batch with a
+stale previous checkpoint fails with `archive.ErrCheckpoint`.
 
-For standalone recovery, explicitly read the archive's committed checkpoint and
-resume `Read` from that checkpoint. This reconciles capture progress without
-asserting that an old receipt was recovered. The archive's existing identity
-constraints avoid duplicate records/changes on resumed reads. An external
-multi-destination transport needs its own durable spool and receipt/reconciliation
-policy before it can safely discard pending delivery. There is no exactly-once
-delivery promise or durable batch-receipt ledger in this slice.
+The [capture spool](CAPTURE-SPOOL-V1.md) persists complete envelopes and a
+producer checkpoint before delivery. It tracks destination acknowledgements
+independently. Its producer checkpoint can be ahead of a sink checkpoint while
+deliveries remain pending. A standalone collector recovering without a spool
+can reconcile from the archive's committed checkpoint. Neither route promises
+exactly-once delivery.
 
 ## Boundaries, gaps and corrections
 
@@ -115,15 +112,15 @@ about capture, never task ownership, accepted obligations or verified completion
 
 Native-ID corrections retain the record key and change the source revision.
 Uncertain rewritten occurrences retain existing generation rules. Missing source
-files do not delete archived evidence. No new removal/redaction event or public
-archive change cursor is defined here. Internal `changes` rows are not an API.
+files do not delete archived evidence. The separate [archive feed](ARCHIVE-FEED-V1.md)
+publishes correction, source removal and redaction metadata; the
+[content removal](CONTENT-REMOVAL-V1.md) contract defines authorized withdrawal.
 
 The reader's existing maxima remain 10,000 records, 64 MiB per line and 128 MiB
 of raw bytes per batch. Transport JSON is additionally limited to 256 MiB,
 including base64 and normalized content; choose smaller read limits if needed.
 Validation and hashing scan/encode the envelope at construction and sink
-boundaries. This favors correctness for the first integration; large-envelope
-CPU/memory optimization and performance evidence remain work to do.
+boundaries. Large-envelope CPU and memory measurements remain release work.
 
 ## Synthetic checks and remaining work
 
@@ -135,8 +132,8 @@ schema conformance for real emitted envelopes and acknowledgements, independent
 destinations, source/order/digest failures, native JSON round trips, rewrite gaps,
 transaction rollback and explicit checkpoint reconciliation.
 
-Still pending: Odin-owned consumer pins and fixture checks; durable local spool,
-backlog and receipt storage; multi-sink outage/backfill/reconciliation; a published
-incremental archive changes API and cursor invalidation; removal/redaction and
-retention receipts per destination; live feed integration and full OHS-07 gates.
+The local producer now has a durable spool, archive feed and redaction receipt.
+Still pending are a published release, Odin-owned consumer pins and shared
+fixture checks, live multi-sink outage/backfill evidence, destination-specific
+retention/removal acknowledgement, live feed integration and full OHS-07 gates.
 The standalone archive and browser remain independently usable.

@@ -16,6 +16,7 @@ check-go:
 test: check-go
 	$(GO) test ./...
 	python3 scripts/check_schema.py
+	python3 scripts/release_manifest.py --check
 
 check: test
 	$(GO) vet ./...

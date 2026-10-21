@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://skald.invalid/schemas/archive-feed-v1.schema.json",
+  "title": "Skald archive metadata feed v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "phase", "high_water", "more", "events", "next_cursor"],
+  "properties": {
+    "version": {"const": 1},
+    "phase": {"enum": ["snapshot", "tail"]},
+    "high_water": {"type": "integer", "minimum": 0},
+    "more": {"type": "boolean"},
+    "next_cursor": {"type": "string", "minLength": 1},
+    "events": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/event"}}
+  },
+  "$defs": {
+    "locator": {
+      "type": "object", "additionalProperties": false,
+      "required": ["record_key", "source_revision", "adapter_version"],
+      "properties": {
+        "record_key": {"type": "string", "minLength": 1},
+        "source_revision": {"type": "string", "minLength": 1},
+        "adapter_version": {"type": "string", "minLength": 1}
+      }
+    },
+    "event": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sequence", "kind", "namespace"],
+      "allOf": [
+        {"if": {"properties": {"kind": {"enum": ["record", "correction"]}}, "required": ["kind"]},
+         "then": {"required": ["record_key", "source_revision"]}}
+      ],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 1},
+        "kind": {"enum": ["record", "correction", "gap", "source_health", "source_removed", "redaction"]},
+        "namespace": {"type": "string", "minLength": 1},
+        "record_key": {"type": "string", "minLength": 1},
+        "source_revision": {"type": "string", "minLength": 1},
+        "locator": {"$ref": "#/$defs/locator"},
+        "stream_key": {"type": "string"},
+        "stream_generation": {"type": "string"},
+        "ordinal": {"type": "integer", "minimum": 0},
+        "gap_code": {"type": "string"},
+        "gap_offset": {"type": "integer", "minimum": 0},
+        "health": {"type": "string"},
+        "scope_kind": {"enum": ["source", "conversation", "record"]},
+        "scope_key": {"type": "string"},
+        "unavailable": {"enum": ["redacted", "evidence_missing", "native_source_removed"]}
+      }
+    }
+  }
+}

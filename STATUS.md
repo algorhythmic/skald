@@ -1,11 +1,62 @@
 # Skald implementation status
 
-Updated 2026-10-19. **Source connection, archive daemon and native TUI are implemented and verified.**
+Updated 2026-10-21. **The Skald-owned OHS producer implementation batches are complete and verified locally.**
 Skald can now enroll primary conversations in selected Claude/Codex roots and
 Devin desktop session stores (`acp-messages` SQLite),
 retain independent history, serve bounded reads, and back up/restore its archive.
 The TUI browses project groups, bounded excerpts, native recaps and transcript
 history through the socket API. Retrieval and peer integrations remain future work. The full release gates below remain open.
+
+## Remaining Odin producer batches — 2026-10-21
+
+Three Sol implementation agents completed the archive feed, durable delivery,
+and capture/recovery batches, with integration and review in the standalone daemon.
+This completes the selected Skald implementation scope from the
+[producer plan](docs/ODIN-INTEGRATION-PLAN.md). It does not close the cross-repository
+OHS exits, live rollout, or the broader L0–L6 release gates.
+
+- Added public `archivefeed` v1 and `changes`/`capabilities` commands. The metadata
+  feed provides a fixed snapshot followed by tail pages, exact revision locators,
+  corrections, gaps, source removal and redaction. Cursors survive ordinary writes
+  and same-scope restart; archive restore and scope revocation invalidate them.
+- Added public `capturespool` with immutable persisted envelopes, atomic producer
+  checkpoints, independent destination receipts, replay and visible scoped backlog.
+  The daemon uses the spool for its standalone archive. Exact batch receipts prevent
+  metadata-only batches from inheriting another batch's success. Archive instance
+  binding and checkpoint reconciliation refuse mismatched recovery state.
+- Upgraded the archive to schema 6 with atomic sink receipts, durable removal
+  receipts and persisted read scope. A lost response can be retried after later
+  batches and process restart without duplicating records or regressing progress.
+  Upgrades preserve a verified pre-upgrade archive copy.
+- Added explicit `redact` management for source, conversation and record scopes.
+  Removal deletes archived content/projections, preserves unavailable-reference
+  identity and suppression, and emits a feed withdrawal. Backup and redaction
+  drain the spool under the collector lock, refusing unresolved pending work.
+- Hardened identity probes and Devin source paths, rejected Claude sidechains in
+  primary streams, and added Codex parent-evidence/unsupported-capability fixtures.
+  A hot Devin WAL before the first capture now stores a valid deferred checkpoint
+  and resumes once quiet. The default read batch is 512 records; synthetic parser
+  backfill measured about 500 ms versus 887 ms at 256 records for 8,192 records.
+- Added independently validated feed/removal schemas, shared synthetic fixtures,
+  and a reproducible [contract manifest](docs/PRODUCER-CONTRACT-MANIFEST.json).
+  The [producer candidate](docs/PRODUCER-RELEASE-CANDIDATE.md) records publication
+  scope and remaining consumer/release evidence.
+
+Verification: `make check smoke tui-smoke discovery-smoke`,
+`go test -race ./...` with the project toolchain/caches, and `git diff --check`
+pass. Coverage includes receipt failure rollback, independent sink failure,
+metadata-only replay, removed-source backlog, archive/spool mismatch, source loss,
+rewrite and reappearance, schema 5→6 recovery, redaction after restore, namespace
+isolation, bounded feed snapshot/tail, and standalone terminal restoration.
+Runtime checks used private synthetic data and required Unix socket/PTY sandbox
+access. The compiled binary reports archive schema 6. No live provider
+configuration, installed service, peer repository or task authority changed.
+
+The spool's 1,024-envelope/256 MiB limits bound pending payloads, not lifetime
+SQLite metadata or WAL size. Removal is logical, not a physical erasure guarantee
+for WAL, prior backups or downstream copies. Tagged producer publication, Odin
+consumer pins/tests, historical overlap reconciliation, live destination transport,
+and destination-specific removal acknowledgements remain release/integration work.
 
 ## Initial Odin integration batch — 2026-10-19
 
@@ -31,14 +82,11 @@ CLI and TUI and records the remaining EC-14 publication and consumer checks.
   and gapped sources. See the [receipt](docs/IMPLEMENTATION-RECEIPT-2026-10-19.md)
   for counts, baseline checks and remaining live-source investigation.
 
-The archive sink intentionally refuses stale previous checkpoints after an
-uncertain acknowledgement; callers reconcile persisted state before continuing.
-This is not durable receipt storage or exactly-once delivery. The public archive
-change feed, workstation spool, per-destination durable acknowledgement state,
-redaction/removal propagation, producer release and Odin pins remain open. Large
-delivery validation cost is not yet benchmarked. A hot Devin WAL before the first
-checkpoint retains its existing blocked-capture limitation. No live installation,
-source configuration, peer repository or task authority was changed.
+At the end of this initial batch, durable receipts, archive changes, the spool,
+removal propagation and the first-checkpoint Devin WAL fix remained pending.
+The 2026-10-21 batch above supersedes those implementation limitations. Producer
+tagging and Odin acceptance remain separate. No live installation, source
+configuration, peer repository or task authority was changed.
 
 Integrated verification: `make check smoke tui-smoke discovery-smoke` passed,
 including Go tests, JSON Schema conformance, SQLite DDL checks, vet, compiled
@@ -94,14 +142,14 @@ synthetic state. `git diff --check` and updated documentation links also pass.
   bookkeeping pages to open-but-idle sessions. A consumed input request reads
   as working; cross-stream signal
   ordering is labeled ambiguous. This is archived evidence, not live presence.
-- SQLite schema 5 with original bytes, immutable source and normalization versions,
+- SQLite schema 6 with original bytes, immutable source and normalization versions,
   separate source-order observations/generation epochs, checkpoint/change commits,
   capture gaps, source health, record heads and project observations. Native titles
   have bounded attributable projections; ambiguous cross-stream ordering is labeled.
 - Bounded periodic backfill/tailing. Partial lines wait, malformed lines remain
   opaque with gaps, rewrites are explicit, and source removal preserves history.
   Capacity/suppression failures do not advance checkpoints.
-- `serve`, `status`, `sessions`, `artifacts`, exact `get`, `backup`, and fresh-directory
+- `serve`, `status`, `capabilities`, `changes`, `redact`, `sessions`, `artifacts`, exact `get`, `backup`, and fresh-directory
   `restore`, alongside the earlier read-only diagnostics. All live CLI reads go
   through the socket. Activity remains `unknown` until L2 evidence selection.
 - Namespace-bound pagination with explicit expiry after archive changes; source-ordered
@@ -163,11 +211,11 @@ Large native transcripts still incur repeated full-prefix hashing per batch.
 
 ## Remaining work
 
-1. Finish capture release gates: native subagent/fork/alias fixtures and broader
-   installed-provider capability verification. The module path is now
-   `github.com/algorhythmic/skald`, tagged `v0.1.0` for consumers. Root aliases
-   and stream tokens persist, but provider conversation aliases remain a separate
-   capability.
+1. Publish and pin the new producer bundle, then run Odin consumer fixtures and
+   record supported installed-provider capabilities. Existing `v0.1.0`/`v0.1.1`
+   tags predate these interfaces. Native parent evidence and explicit unsupported
+   subagent/alias cases are fixture-covered; full enrollment/projection support
+   and broader provider verification remain separate release capabilities.
 2. Measure and improve large-transcript backfill/tailing and storage growth. Test
    extended disk-pressure and migration/recovery scenarios. Keep current explicit
    capacity and coverage diagnostics; do not claim full L1 release acceptance yet.

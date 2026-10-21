@@ -14,7 +14,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/algorhythmic/skald/archivefeed"
+	"github.com/algorhythmic/skald/capturespool"
 	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 type API struct {
@@ -48,8 +51,24 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respond(w, nil, errors.New("invalid_request"))
 			return
 		}
-		path, err := a.Store.Backup(r.Context())
+		path, err := a.Collector.Backup(r.Context())
 		respond(w, map[string]string{"backup": path}, err)
+		return
+	}
+	if r.Method == "POST" && r.URL.Path == "/manage/redact" {
+		q := r.URL.Query()
+		for key, values := range q {
+			if (key != "namespace" && key != "scope" && key != "target") || len(values) != 1 {
+				respond(w, nil, errors.New("invalid_request"))
+				return
+			}
+		}
+		if len(ns) != 1 || q.Get("namespace") == "" || q.Get("scope") == "" || q.Get("target") == "" || r.ContentLength != 0 {
+			respond(w, nil, errors.New("invalid_request"))
+			return
+		}
+		receipt, err := a.Collector.Redact(r.Context(), ns[0], q.Get("scope"), q.Get("target"))
+		respond(w, receipt, err)
 		return
 	}
 	if r.Method != "GET" {
@@ -58,11 +77,13 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	allowed := map[string]map[string]bool{
-		"/v1/status":     {"namespace": true},
-		"/v1/sessions":   {"namespace": true, "limit": true, "cursor": true},
-		"/v1/transcript": {"namespace": true, "limit": true, "cursor": true, "conversation": true, "history": true},
-		"/v1/artifacts":  {"namespace": true, "limit": true, "cursor": true, "conversation": true},
-		"/v1/record":     {"namespace": true, "record": true, "revision": true, "adapter": true, "raw": true},
+		"/v1/status":       {"namespace": true},
+		"/v1/capabilities": {"namespace": true},
+		"/v1/changes":      {"namespace": true, "limit": true, "cursor": true},
+		"/v1/sessions":     {"namespace": true, "limit": true, "cursor": true},
+		"/v1/transcript":   {"namespace": true, "limit": true, "cursor": true, "conversation": true, "history": true},
+		"/v1/artifacts":    {"namespace": true, "limit": true, "cursor": true, "conversation": true},
+		"/v1/record":       {"namespace": true, "record": true, "revision": true, "adapter": true, "raw": true},
 	}
 	for k, values := range q {
 		if !allowed[r.URL.Path][k] || len(values) != 1 {
@@ -104,8 +125,29 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			status["discovery"] = discovery
+			status["capture_delivery"], err = a.Collector.DeliveryStatus(ns)
 		}
 		respond(w, status, err)
+	case "/v1/capabilities":
+		status, err := a.Store.Stats(r.Context(), ns)
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		respond(w, map[string]any{
+			"contracts":      map[string]int{"sessionrecord": 1, "capture_delivery": sessioncapture.DeliveryVersion, "archive_feed": archivefeed.Version, "redaction_receipt": 1},
+			"archive_schema": archive.SchemaVersion, "archive_instance": status["archive_instance"], "namespaces": ns,
+			"features":    []string{"exact_revision_reads", "archive_snapshot_and_tail", "durable_capture_spool", "independent_destination_receipts", "logical_content_removal"},
+			"unsupported": []string{"remote_destination_transport", "odin_consumer", "physical_media_erasure"},
+		}, nil)
+	case "/v1/changes":
+		generation, err := a.Store.ReadScopeGeneration(r.Context())
+		if err != nil {
+			respond(w, nil, err)
+			return
+		}
+		page, err := a.Store.Changes(r.Context(), ns, generation, q.Get("cursor"), limit)
+		respond(w, page, err)
 	case "/v1/sessions":
 		result, err := a.Store.Sessions(r.Context(), ns, q.Get("cursor"), limit)
 		respond(w, result, err)
@@ -142,8 +184,11 @@ func respond(w http.ResponseWriter, value any, err error) {
 		if code == "scope_denied" {
 			status = http.StatusForbidden
 		}
-		if code == "cursor_expired" {
+		if code == "cursor_expired" || code == "archive_feed_cursor_expired" || code == "capture_spool_pending" {
 			status = http.StatusConflict
+		}
+		if code == "evidence_redacted" {
+			status = http.StatusGone
 		}
 		if code == "archive_error" {
 			status = http.StatusInternalServerError
@@ -201,7 +246,12 @@ func Serve(ctx context.Context, cfg Config, dataDir, socket string, ready func()
 		return err
 	}
 	defer s.Close()
-	collector := &Collector{Store: s, Config: cfg}
+	spool, err := capturespool.Open(filepath.Join(dataDir, "spool"), []string{localDestination}, capturespool.Limits{MaxPending: 1024, MaxBytes: 256 << 20})
+	if err != nil {
+		return err
+	}
+	defer spool.Close()
+	collector := &Collector{Store: s, Spool: spool, Config: cfg}
 	if err := collector.Initialize(ctx); err != nil {
 		return err
 	}

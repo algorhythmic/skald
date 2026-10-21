@@ -1,0 +1,49 @@
+{
+  "version": 1,
+  "phase": "snapshot",
+  "high_water": 4,
+  "more": false,
+  "events": [
+    {
+      "sequence": 1,
+      "kind": "record",
+      "namespace": "fixture:claude",
+      "record_key": "sr1:record:retained",
+      "source_revision": "sr1:revision:a",
+      "locator": {
+        "record_key": "sr1:record:retained",
+        "source_revision": "sr1:revision:a",
+        "adapter_version": "jsonl-v1.0.0"
+      },
+      "stream_key": "sr1:stream:synthetic",
+      "stream_generation": "sr1:generation:synthetic",
+      "ordinal": 0
+    },
+    {
+      "sequence": 2,
+      "kind": "gap",
+      "namespace": "fixture:claude",
+      "stream_key": "sr1:stream:synthetic",
+      "stream_generation": "sr1:generation:synthetic",
+      "ordinal": 1,
+      "gap_code": "malformed_json",
+      "gap_offset": 128
+    },
+    {
+      "sequence": 3,
+      "kind": "source_removed",
+      "namespace": "fixture:claude",
+      "stream_key": "sr1:stream:synthetic",
+      "unavailable": "native_source_removed"
+    },
+    {
+      "sequence": 4,
+      "kind": "correction",
+      "namespace": "fixture:claude",
+      "record_key": "sr1:record:synthetic",
+      "source_revision": "sr1:revision:b",
+      "unavailable": "redacted"
+    }
+  ],
+  "next_cursor": "synthetic-opaque-cursor"
+}

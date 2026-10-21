@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "cases": [
+    {"name": "snapshot-watermark", "start_high_water": 4, "later_sequence": 5, "expect_snapshot_max": 4, "expect_first_tail": 5},
+    {"name": "correction", "record_key": "sr1:record:synthetic", "first_revision": "sr1:revision:a", "corrected_revision": "sr1:revision:b", "expect_kind": "correction"},
+    {"name": "source-removal-retains-evidence", "expect_kind": "source_removed", "locator_remains_available": true},
+    {"name": "authorized-redaction", "expect_kind": "redaction", "prior_locator_unavailable": "redacted"},
+    {"name": "restore", "expect_cursor_error": "archive_feed_cursor_expired"},
+    {"name": "scope-generation-revoked", "expect_cursor_error": "archive_feed_cursor_expired"},
+    {"name": "unsupported-major", "cursor_version": 2, "expect_error": "unsupported_archive_feed_version"}
+  ]
+}

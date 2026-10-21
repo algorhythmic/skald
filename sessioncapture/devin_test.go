@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -61,6 +62,25 @@ func TestDevinEmptyStoreRejected(t *testing.T) {
 	db.Close()
 	if _, err := sessioncapture.Identify(ctx, dir, name, sessioncapture.Devin); err == nil || err.Error() != "empty_session_store" {
 		t.Fatal("metadata-only store must not enroll", err)
+	}
+}
+
+func TestDevinStorePathCannotEscapeSelectedRoot(t *testing.T) {
+	ctx := context.Background()
+	selected := t.TempDir()
+	outside := t.TempDir()
+	name := devinFixture(t, outside)
+	if err := os.Symlink(filepath.Join(outside, name), filepath.Join(selected, name)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessioncapture.Identify(ctx, selected, name, sessioncapture.Devin); err == nil || err.Error() != "invalid_source_path" {
+		t.Fatal("symlinked store identified", err)
+	}
+	if _, err := sessioncapture.DevinDump(ctx, selected, name); err == nil || err.Error() != "invalid_source_path" {
+		t.Fatal("symlinked store dumped", err)
+	}
+	if _, _, err := sessioncapture.DevinActivity(ctx, selected, name); err == nil || err.Error() != "invalid_source_path" {
+		t.Fatal("symlinked store observed", err)
 	}
 }
 

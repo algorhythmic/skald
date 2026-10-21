@@ -31,6 +31,11 @@ func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time) (sessio
 			nativeKind = "unknown"
 		}
 		if source.Provider == Claude {
+			var sidechain bool
+			_ = json.Unmarshal(native["isSidechain"], &sidechain)
+			if sidechain || str(native, "agentId") != "" {
+				return sessionrecord.Record{}, "", errors.New("subagent_identity_unsupported")
+			}
 			id, nativeID = str(native, "sessionId"), str(native, "uuid")
 			if v := str(native, "version"); v != "" {
 				cp.ProviderVersion = v

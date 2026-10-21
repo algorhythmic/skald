@@ -20,6 +20,11 @@ def cli(*args):
     return json.loads(result.stdout)
 
 
+def cli_error(expected, *args):
+    result = subprocess.run([str(BINARY), *map(str, args)], capture_output=True, text=True, timeout=20)
+    assert result.returncode and expected in result.stderr, (result.returncode, result.stderr)
+
+
 with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
     work = Path(work)
     sources = work / "sources"
@@ -74,6 +79,28 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
         assert denied.returncode and "scope_denied" in denied.stderr
         assert (socket.stat().st_mode & 0o777) == 0o600
         assert (data.stat().st_mode & 0o777) == 0o700
+        capabilities = cli("capabilities", "--socket", socket)
+        assert capabilities["contracts"]["archive_feed"] == 1
+        assert capabilities["contracts"]["redaction_receipt"] == 1
+        assert capabilities["archive_schema"] == 6
+        assert capabilities["namespaces"] == ["fixture:claude", "fixture:codex"]
+        first_feed = cli("changes", "--socket", socket, "--limit", 3)
+        assert first_feed["version"] == 1 and first_feed["phase"] == "snapshot"
+        assert first_feed["more"] and len(first_feed["events"]) == 3
+        snapshot_boundary = first_feed["high_water"]
+        feed = first_feed
+        snapshot_events = list(feed["events"])
+        while feed["more"]:
+            feed = cli("changes", "--socket", socket, "--limit", 3, "--cursor", feed["next_cursor"])
+            assert feed["phase"] == "snapshot" and feed["high_water"] == snapshot_boundary
+            snapshot_events.extend(feed["events"])
+        assert all(event["sequence"] <= snapshot_boundary for event in snapshot_events)
+        assert sum(event["kind"] == "record" for event in snapshot_events) == 17
+        tail_cursor = feed["next_cursor"]
+        caught_up = cli("changes", "--socket", socket, "--cursor", tail_cursor)
+        assert caught_up["phase"] == "tail" and not caught_up["more"] and not caught_up["events"]
+        tail_cursor = caught_up["next_cursor"]
+        cli_error("scope_denied", "changes", "--socket", socket, "--namespace", "fixture:outside")
         second = subprocess.run([str(BINARY), "serve", "--config", str(config), "--data-dir", str(data),
                                  "--socket", str(work / "second/socket")], capture_output=True, text=True, timeout=5)
         assert second.returncode and "archive_in_use" in second.stderr
@@ -103,6 +130,10 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
         proc = start(data)
         resumed = wait_for(lambda s: s["record_versions"] == 18 and not s["capture_issues"])
         assert resumed["archive_instance"] == initial["archive_instance"]
+        tail_page = cli("changes", "--socket", socket, "--cursor", tail_cursor)
+        assert tail_page["phase"] == "tail" and any(
+            e["kind"] == "record" and e["sequence"] > snapshot_boundary for e in tail_page["events"])
+        tail_cursor = tail_page["next_cursor"]
         time.sleep(0.25)
         assert cli("status", "--socket", socket)["record_versions"] == 18
         source_bytes = {p.name: p.read_bytes() for p in sources.iterdir()}
@@ -121,6 +152,7 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
         proc = start(restored)
         state = wait_for(lambda s: s["record_versions"] == 18 and len(s["capture_issues"]) == 2)
         assert state["archive_instance"] != initial["archive_instance"]
+        cli_error("archive_feed_cursor_expired", "changes", "--socket", socket, "--cursor", tail_cursor)
         assert state["sources_total"] == 2 and state["sources_omitted"] == 0
         for health in state["sources"]:
             assert health["health"] == "unavailable" and health["checkpoint_available"]
@@ -133,10 +165,23 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
         assert recovered["record_versions"] == 18
         for health in recovered["sources"]:
             assert {k: health[k] for k in position_fields} == captured_positions[health["stream_key"]]
+        receipt = cli("redact", "--socket", socket, "--namespace", "fixture:claude",
+                      "--scope", "record", "--target", recap["record_key"])
+        assert receipt["version"] == 1 and receipt["scope_key"] == recap["record_key"]
+        assert receipt["records_removed"] == 1 and receipt["versions_removed"] >= 1
+        cli_error("evidence_redacted", "get", "--socket", socket, "--record", recap["record_key"],
+                  "--revision", recap["source_revision"], "--adapter", recap["adapter_version"])
+        redacted_feed = cli("changes", "--socket", socket, "--namespace", "fixture:claude", "--limit", 100)
+        assert any(e["kind"] == "redaction" and e["scope_key"] == recap["record_key"]
+                   for e in redacted_feed["events"])
+        assert any(e["record_key"] == recap["record_key"] and
+                   e["source_revision"] == recap["source_revision"] and
+                   e.get("unavailable") == "redacted" and "locator" not in e
+                   for e in redacted_feed["events"] if e["kind"] in ("record", "correction"))
         proc.terminate()
         assert proc.wait(timeout=10) == 0
         assert not socket.exists()
-        print("Native daemon: scoped source positions/freshness, two providers, private socket, exclusive writer, pending tail, SIGKILL/restart, duplicate-free capture, source loss/reappearance, exact raw reads, backup, fresh restore and clean shutdown pass")
+        print("Native daemon: scoped source positions/freshness, two providers, capabilities, bounded snapshot/tail feed, private socket, exclusive writer, pending tail, SIGKILL/restart, duplicate-free capture, source loss/reappearance, exact raw reads, backup, fresh restore cursor expiry, redaction and clean shutdown pass")
     finally:
         for proc in processes:
             if proc.poll() is None:

@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,6 +27,42 @@ import (
 
 const devinDumpLimit = 512 << 20
 
+// SQLite opens its own database and WAL paths, outside os.Root. Validate every
+// selected path component before constructing the read-only URI. This rejects
+// symlinked sources and treats URI metacharacters as literal filename bytes.
+func devinDSN(root, path string) (string, error) {
+	if !filepath.IsLocal(path) || !strings.HasSuffix(path, ".db") {
+		return "", errors.New("invalid_source_path")
+	}
+	selected, err := os.OpenRoot(root)
+	if err != nil {
+		return "", errors.New("source_unavailable")
+	}
+	defer selected.Close()
+	parts := strings.Split(filepath.Clean(path), string(filepath.Separator))
+	for i := range parts {
+		part := filepath.Join(parts[:i+1]...)
+		info, err := selected.Lstat(part)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 || (i < len(parts)-1 && !info.IsDir()) || (i == len(parts)-1 && !info.Mode().IsRegular()) {
+			return "", errors.New("invalid_source_path")
+		}
+	}
+	for _, sidecar := range []string{path + "-wal", path + "-shm", path + "-journal"} {
+		if info, err := selected.Lstat(sidecar); err == nil {
+			if !info.Mode().IsRegular() {
+				return "", errors.New("invalid_source_path")
+			}
+		} else if !os.IsNotExist(err) {
+			return "", errors.New("invalid_source_path")
+		}
+	}
+	abs, err := filepath.Abs(filepath.Join(root, path))
+	if err != nil {
+		return "", err
+	}
+	return (&url.URL{Scheme: "file", Path: abs, RawQuery: "mode=ro&_pragma=busy_timeout(2000)"}).String(), nil
+}
+
 // DevinDump renders a Devin desktop acp-messages database as canonical JSONL.
 // A ro SQLite connection observes committed state only, so the dump is a
 // consistent snapshot. The desktop rewrites rows in place while a session is
@@ -33,6 +71,9 @@ const devinDumpLimit = 512 << 20
 // DevinWal reports the WAL's mtime. The store is "hot" when the WAL was
 // touched within the last thirty seconds — capture defers while hot.
 func DevinWal(root, path string) (time.Time, bool) {
+	if _, err := devinDSN(root, path); err != nil {
+		return time.Time{}, false
+	}
 	st, err := os.Stat(filepath.Join(root, path) + "-wal")
 	if err != nil {
 		return time.Time{}, false
@@ -46,7 +87,11 @@ func DevinWal(root, path string) (time.Time, bool) {
 // is. A read-only probe on a hot WAL may race a commit — it is a liveness
 // hint, never stored state.
 func DevinActivity(ctx context.Context, root, path string) (count, maxPos int, err error) {
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(root, path)+"?mode=ro")
+	dsn, err := devinDSN(root, path)
+	if err != nil {
+		return 0, 0, err
+	}
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -56,21 +101,27 @@ func DevinActivity(ctx context.Context, root, path string) (count, maxPos int, e
 }
 
 func DevinDump(ctx context.Context, root, path string) ([]byte, error) {
-	if !filepath.IsLocal(path) || !strings.HasSuffix(path, ".db") {
-		return nil, errors.New("invalid_source_path")
+	dsn, err := devinDSN(root, path)
+	if err != nil {
+		return nil, err
 	}
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(root, path)+"?mode=ro&_pragma=busy_timeout(2000)")
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
 	defer db.Close()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
 	var out bytes.Buffer
 	// Only stable meta fields enter the canonical stream: counters and live
 	// session config churn on every write and would invalidate the prefix.
 	var infoTitle, schemaVersion string
-	_ = db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='schema_version'").Scan(&schemaVersion)
+	_ = tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='schema_version'").Scan(&schemaVersion)
 	var infoRaw string
-	if err := db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='info'").Scan(&infoRaw); err == nil {
+	if err := tx.QueryRowContext(ctx, "SELECT value FROM meta WHERE key='info'").Scan(&infoRaw); err == nil {
 		var info object
 		if json.Unmarshal([]byte(infoRaw), &info) == nil {
 			infoTitle = str(info, "title")
@@ -79,40 +130,37 @@ func DevinDump(ctx context.Context, root, path string) ([]byte, error) {
 	meta := map[string]any{"schema_version": schemaVersion, "info": map[string]any{"title": infoTitle}}
 	encoded, _ := json.Marshal(meta)
 	fmt.Fprintf(&out, `{"kind":"meta","payload":%s}`+"\n", encoded)
-	type mrow struct {
-		pos     int64
-		kind    string
-		payload string
-	}
-	var all []mrow
-	rows, err := db.QueryContext(ctx, "SELECT position,kind,payload FROM messages ORDER BY position")
+	rows, err := tx.QueryContext(ctx, "SELECT position,kind,payload FROM messages ORDER BY position")
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
-		var r mrow
-		if err := rows.Scan(&r.pos, &r.kind, &r.payload); err != nil {
+		var pos int64
+		var kind, payload string
+		if err := rows.Scan(&pos, &kind, &payload); err != nil {
 			rows.Close()
 			return nil, err
 		}
-		all = append(all, r)
+		kindJSON, _ := json.Marshal(kind)
+		position := strconv.FormatInt(pos, 10)
+		lineBytes := len(`{"kind":`) + len(kindJSON) + len(`,"position":`) + len(position) + len(`,"payload":`) + len(payload) + len("}\n")
+		if lineBytes > devinDumpLimit-out.Len() {
+			rows.Close()
+			return nil, errors.New("source_too_large")
+		}
+		out.WriteString(`{"kind":`)
+		out.Write(kindJSON)
+		out.WriteString(`,"position":`)
+		out.WriteString(position)
+		out.WriteString(`,"payload":`)
+		out.WriteString(payload)
+		out.WriteString("}\n")
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
 		return nil, err
 	}
 	rows.Close()
-	for _, r := range all {
-		if out.Len() > devinDumpLimit {
-			return nil, errors.New("source_too_large")
-		}
-		kindJSON, _ := json.Marshal(r.kind)
-		out.WriteString(`{"kind":`)
-		out.Write(kindJSON)
-		fmt.Fprintf(&out, `,"position":%d,"payload":`, r.pos)
-		out.WriteString(r.payload)
-		out.WriteString("}\n")
-	}
 	return out.Bytes(), nil
 }
 
@@ -120,10 +168,11 @@ func DevinDump(ctx context.Context, root, path string) ([]byte, error) {
 // row count and the message count are metadata, never bodies.
 func identifyDevin(ctx context.Context, root, path string) (Identity, error) {
 	out := Identity{Evidence: "sqlite_store_shape", ProviderVersion: "unknown"}
-	if !filepath.IsLocal(path) || !strings.HasSuffix(path, ".db") {
-		return out, errors.New("invalid_source_path")
+	dsn, err := devinDSN(root, path)
+	if err != nil {
+		return out, err
 	}
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(root, path)+"?mode=ro&_pragma=busy_timeout(2000)")
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return out, errors.New("source_unavailable")
 	}

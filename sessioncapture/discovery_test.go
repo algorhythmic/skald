@@ -59,3 +59,22 @@ func TestDiscoveryConfinementAndNativeIdentity(t *testing.T) {
 		t.Fatal(id, err)
 	}
 }
+
+func TestIdentifyReportsBoundedProbeExhaustion(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "late-identity.jsonl")
+	raw := strings.Repeat(`{"type":"file-history-snapshot"}`+"\n", 256) + `{"type":"user","sessionId":"late","message":{"role":"user","content":"synthetic"}}` + "\n"
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Identify(context.Background(), root, "late-identity.jsonl", Claude); err == nil || err.Error() != "identity_probe_limit" {
+		t.Fatal("exhausted record probe mislabeled", err)
+	}
+	raw = `{"type":"file-history-snapshot","padding":"` + strings.Repeat("x", 4<<20) + `"}`
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Identify(context.Background(), root, "late-identity.jsonl", Claude); err == nil || err.Error() != "identity_probe_limit" {
+		t.Fatal("exhausted byte probe mislabeled", err)
+	}
+}

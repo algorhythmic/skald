@@ -800,12 +800,13 @@ document or recap never accepts a Heimdall decision or validates a WCU recipe.
 
 Skald retains its archive, CLI and TUI as maintained standalone capabilities.
 The [Odin integration plan](docs/ODIN-INTEGRATION-PLAN.md) maps OHS-02/03/07 to
-Skald's existing gates and the EC-14 producer work. Prepare a versioned public
-collector/sink boundary and synthetic fixtures first. A public archive changes
-reader, durable workstation spool, per-destination acknowledgements, publication
-and consumer pins remain distinct deliverables. Internal database tables are
-never the consumer API. The local archive remains a sink and keeps sole-writer,
-checkpoint, backup and restore guarantees.
+Skald's existing gates and the EC-14 producer work. The versioned collector/sink
+boundary, public archive changes reader, durable capture spool, independent
+acknowledgements and logical content removal are implemented with synthetic
+fixtures as of 2026-10-21. Tagged publication and consumer pins/acceptance remain
+separate deliverables. Internal database tables are never the consumer API.
+The local archive remains a sink and keeps sole-writer, checkpoint, backup and
+restore guarantees; backup requires pending spool deliveries to drain.
 
 Odin's target is one editable commitment authority after importing and fencing
 Heimdall's migrated records. This is not a permanent task-state synchronization
@@ -820,7 +821,7 @@ unavailable or historical association. Local groups cannot assign obligations,
 change task ownership or widen permissions. Preserve many-to-many session/task
 links and leave ambiguous project associations explicit.
 
-Direct capture and an eventual archive feed preserve source keys and revisions.
+Direct capture and the archive feed preserve source keys and revisions.
 Each destination owns its checkpoint, retained subset and removal receipts; a
 successful delivery to one sink cannot acknowledge another. Retry reconciliation
 uses source identity/revision, not timing or an exactly-once promise. Switching

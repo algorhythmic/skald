@@ -1,22 +1,21 @@
 # Session record v1
 
-The module is `github.com/algorhythmic/skald`, published from that repository.
+The module path is `github.com/algorhythmic/skald`.
 Its public packages are `github.com/algorhythmic/skald/sessionrecord` and
 `github.com/algorhythmic/skald/sessioncapture`. The public packages import no
 Heimdall code, database, task state, hooks, model clients or desktop services.
-Consumers pin a tagged release (`v0.1.0` onward) rather than a commit
-pseudo-version. The record and identity encoding below is the released v1
-contract; the provider compatibility freeze for native file formats remains
-release work and is tracked in [STATUS.md](../STATUS.md).
+Consumers must pin a published producer release rather than infer compatibility
+from a local tag or development checkout. The record and identity encoding below
+is version 1; the provider compatibility freeze and publication receipt remain
+release work tracked in [STATUS.md](../STATUS.md).
 
 The [Odin producer plan](ODIN-INTEGRATION-PLAN.md) tracks EC-14 preparation;
 the first local [capture-delivery contract](CAPTURE-DELIVERY-V1.md) defines its
 collector/sink envelope and standalone archive adapter.
-The versioned record contract does not itself publish a capture delivery API,
-archive change cursor or durable multi-destination spool. Consumer releases must
-pin the exact published interfaces and shared fixture versions they use; local
-tags or historical release notes alone do not establish compatibility. The
-record schema and canonical identity bytes remain unchanged by that preparation.
+The local producer also implements the [archive feed](ARCHIVE-FEED-V1.md),
+[capture spool](CAPTURE-SPOOL-V1.md) and [content removal](CONTENT-REMOVAL-V1.md)
+contracts. These interfaces still need a published release and matching consumer
+pins. The record schema and canonical identity bytes remain unchanged.
 
 ## Identity encoding
 
@@ -39,7 +38,7 @@ ambiguous concatenations. Fields larger than uint32 are outside the contract.
 
 A configured namespace override is authoritative and is returned verbatim. Each
 consumer must use the same namespace and logical stream token for the same native
-source. The future source registry must persist these before capture and preserve
+source. The source registry persists these before capture and preserves
 them through explicit root aliases. Caller filenames and ingest times are not
 record identities. L0 inspect requires explicit namespace/stream arguments rather
 than silently choosing identities from a path. The namespace helper accepts a
@@ -96,7 +95,7 @@ boundary. Unknown record types are losslessly retained with an opaque availabili
 reason. Oversized lines and missing/conflicting native conversation IDs block
 without consuming that line. Historical gaps require consumer reconciliation.
 
-Defaults: 256 records, 4 MiB per line, 16 MiB of source bytes per batch. Memory is
+Defaults: 512 records, 4 MiB per line, 16 MiB of source bytes per batch. Memory is
 bounded by those source limits plus normalized/JSON representation overhead.
 The CLI `--raw` uses base64, so output bytes can exceed input bytes. Full-prefix
 rehashing has linear read cost on every batch; it is a conservative L0 correctness
@@ -118,11 +117,12 @@ message, keeps record provenance, and yields to any later native title. The
 schema-4 migration projects per-conversation activity: the latest native
 lifecycle signal or unanswered input request, the newest observed record
 position and source time, and an ordering-ambiguity label across streams.
-The current schema 5 additionally labels continuation-derived session titles.
+Schema 5 additionally labels continuation-derived session titles. Schema 6 adds
+atomic capture and redaction receipts and persisted archive read scope.
 A sole-writer service now commits capture batches, serves
 reads and creates/restores consistent backups. Later group/surface/description/
-index tables belong to their owning milestones. Suppression tombstones already
-block reingestion; a user-facing deletion service remains pending.
+index tables belong to their owning milestones. Suppression tombstones and
+content removal block reingestion; see the [removal contract](CONTENT-REMOVAL-V1.md).
 
 Go language baseline: 1.25.0; tested toolchain: 1.27.1. The `sessionrecord`
 package uses only the standard library. The

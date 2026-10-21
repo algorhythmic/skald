@@ -57,7 +57,25 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 		return err
 	}
 	defer tx.Rollback()
+	removed := map[string]string{}
 	if replace {
+		rows, err := tx.QueryContext(ctx, "SELECT stream_key,namespace FROM stream_locators JOIN streams USING(stream_key) WHERE active=1")
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var key, namespace string
+			if err := rows.Scan(&key, &namespace); err != nil {
+				rows.Close()
+				return err
+			}
+			removed[key] = namespace
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET active=0,health='unconfigured'"); err != nil {
 			return err
 		}
@@ -71,6 +89,7 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 			return errors.New("duplicate_stream_registration")
 		}
 		seen[r.Key()] = true
+		delete(removed, r.Key())
 		var provider string
 		err := tx.QueryRowContext(ctx, "SELECT provider FROM sources WHERE namespace=?", r.Namespace).Scan(&provider)
 		if err != nil && err != sql.ErrNoRows {
@@ -129,9 +148,14 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 			return err
 		}
 	}
-	// Any configuration reload invalidates read cursors, including scope narrowing.
+	// Source removal is an availability event; archived evidence remains readable.
+	for key, namespace := range removed {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,payload_json) VALUES ('source',?,?)", namespace, encode(map[string]string{"stream": key, "state": "unconfigured"})); err != nil {
+			return err
+		}
+	}
 	for _, r := range registrations {
-		if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,payload_json) VALUES ('source',?,?)", r.Namespace, `{"state":"configured"}`); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,payload_json) VALUES ('source',?,?)", r.Namespace, encode(map[string]string{"stream": r.Key(), "state": "configured"})); err != nil {
 			return err
 		}
 	}
@@ -168,6 +192,12 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 	defer func() { finalErr = capacityError(finalErr) }()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.ingest(ctx, r, previous, batch, now, nil)
+}
+
+// ingest requires the writer mutex. A delivery receipt shares the record and
+// checkpoint transaction, so an uncertain response can be retried after restart.
+func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time, receipt *sessioncapture.Acknowledgement) error {
 	if err := r.Validate(); err != nil {
 		return err
 	}
@@ -238,6 +268,13 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 	if active != 1 {
 		return errors.New("source_not_registered")
 	}
+	conversation := ""
+	if cp.ConversationID != "" {
+		conversation = sessionrecord.Conversation(r.Namespace, cp.ConversationID)
+	}
+	if err := checkSuppression(ctx, tx, r.Namespace, conversation, ""); err != nil {
+		return err
+	}
 	if cp.Generation != "" {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO stream_generations VALUES (?,?,?) ON CONFLICT DO NOTHING", r.Key(), cp.Generation, cp.Epoch); err != nil {
 			return err
@@ -280,10 +317,15 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 		}
 		inserted, _ := result.RowsAffected()
 		if inserted > 0 {
+			var priorRevision string
+			priorErr := tx.QueryRowContext(ctx, "SELECT source_revision FROM record_heads WHERE record_key=?", rec.RecordKey).Scan(&priorRevision)
+			if priorErr != nil && priorErr != sql.ErrNoRows {
+				return priorErr
+			}
 			if _, err := tx.ExecContext(ctx, `INSERT INTO record_heads VALUES (?,?,?) ON CONFLICT(record_key) DO UPDATE SET source_revision=excluded.source_revision,adapter_version=excluded.adapter_version`, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion); err != nil {
 				return err
 			}
-			if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,record_key,source_revision,payload_json) VALUES ('record',?,?,?,?)", r.Namespace, rec.RecordKey, rec.SourceRevision, encode(map[string]any{"stream": r.Key(), "generation": cp.Generation, "ordinal": rec.SourceOrder.Ordinal})); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,record_key,source_revision,payload_json) VALUES ('record',?,?,?,?)", r.Namespace, rec.RecordKey, rec.SourceRevision, encode(map[string]any{"stream": r.Key(), "generation": cp.Generation, "ordinal": rec.SourceOrder.Ordinal, "adapter_version": rec.AdapterVersion, "correction": priorErr == nil && priorRevision != rec.SourceRevision})); err != nil {
 				return err
 			}
 			if rec.Kind == "title" && rec.Body.Text != "" {
@@ -365,7 +407,7 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 		}
 		n, _ := result.RowsAffected()
 		if n > 0 {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,payload_json) VALUES ('gap',?,?)", r.Namespace, encode(gap)); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,payload_json) VALUES ('gap',?,?)", r.Namespace, encode(map[string]any{"stream": r.Key(), "generation": gap.Generation, "ordinal": gap.Ordinal, "offset": gap.Offset, "code": gap.Code})); err != nil {
 				return err
 			}
 		}
@@ -394,6 +436,11 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 	}
 	if _, err := tx.ExecContext(ctx, "UPDATE sources SET capabilities_json=?,adapter_version=? WHERE namespace=?", encode(sessioncapture.Probe(r.Provider, cp.ProviderVersion)), sessioncapture.AdapterVersion, r.Namespace); err != nil {
 		return err
+	}
+	if receipt != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO capture_receipts VALUES (?,?,?,?,?)", receipt.Destination, receipt.BatchID, receipt.SourceKey, encode(receipt), stamp(now)); err != nil {
+			return err
+		}
 	}
 	return capacityError(tx.Commit())
 }
@@ -845,14 +892,14 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 		return err
 	}
 	type activity struct {
-		stream           string
-		seenE, seenO     int64
-		seenT            any
-		signal           string
-		sigE, sigO       int64
-		sigT             any
-		sigFound         bool
-		streams          map[string]bool
+		stream       string
+		seenE, seenO int64
+		seenT        any
+		signal       string
+		sigE, sigO   int64
+		sigT         any
+		sigFound     bool
+		streams      map[string]bool
 	}
 	acts := map[string]*activity{}
 	for rows.Next() {

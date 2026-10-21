@@ -22,6 +22,8 @@ socket is `$XDG_RUNTIME_DIR/skald/skald.sock`. In another terminal:
 ```sh
 ./bin/skald tui
 ./bin/skald status
+./bin/skald capabilities
+./bin/skald changes --limit 25
 ./bin/skald sessions
 ./bin/skald artifacts --conversation CONVERSATION_KEY
 ./bin/skald get --record RECORD_KEY --revision SOURCE_REVISION --adapter ADAPTER_VERSION
@@ -100,8 +102,8 @@ line is archived opaque with a retained gap; an incomplete final line waits for
 its newline. Oversized records and conflicting identities block before that line.
 
 Source loss is an availability diagnostic. It does not delete history, fabricate
-an end signal, or complete a task. Session lists currently report activity as
-`unknown`; evidence-based live activity remains future work. The TUI selects
+an end signal, or complete a task. Session lists project archived lifecycle or
+record-shape evidence with explicit unknowns; this is not live presence. The TUI selects
 labeled excerpts and native recaps within its bounded recent-record window.
 The displayed title is a bounded archived native title with its source reference,
 native ID fallback and a flag for ambiguous ordering between streams. A later
@@ -123,9 +125,25 @@ round-trip content. These are local CLI interfaces, not the future scoped MCP gr
 
 Pages bind archive instance, namespace scope, ordering and committed boundary.
 Any intervening archive change returns `cursor_expired`, requiring a fresh first
-page; it never silently mixes pages from different boundaries. Retained historical
-snapshot pagination and a public change feed remain later work. Session/artifact pages allow 1–100 items; transcript pages allow 1–25 display
+page; it never silently mixes pages from different boundaries. The separate
+[archive feed](ARCHIVE-FEED-V1.md) offers a scoped snapshot-plus-tail metadata
+cursor for consumers. Session/artifact pages allow 1–100 items; transcript pages allow 1–25 display
 records. HTTP responses have a 32 MiB byte limit.
+
+Use `changes --cursor CURSOR` to continue the feed. Its `more` flag indicates
+another page is available; keep `next_cursor` for the next poll even when `more`
+is false. Feed events contain metadata and exact locators, not transcript text.
+
+To remove a selected record from the archive, use its namespace and record key:
+
+```sh
+./bin/skald redact --namespace NAMESPACE --scope record --target RECORD_KEY
+```
+
+For a conversation use `--scope conversation --target CONVERSATION_KEY`; for a
+whole namespace use `--scope source --target NAMESPACE`. A successful response
+is an idempotent logical-removal receipt. Future capture of the target is
+suppressed; native files and earlier backups are separate retention surfaces.
 
 ## Capacity and recovery
 
@@ -133,8 +151,17 @@ records. HTTP responses have a 32 MiB byte limit.
 additional disk cost. `min_free_bytes` defaults to 256 MiB; a pre-transaction
 space check reserves that headroom plus estimated batch growth. Capacity failures
 roll back the entire batch and pause that source visibly in `status`. Capture
-retries on later scans. Existing reads remain available. Retention/deletion commands
-are not implemented; suppression tombstones are already respected by ingestion.
+retries on later scans. Existing reads remain available. Authorized content
+removal creates a [redaction receipt](CONTENT-REMOVAL-V1.md) and suppresses
+reingestion of the target.
+
+The daemon first persists each capture in `spool/capture-spool.sqlite`, then
+delivers it to the local archive. `status.capture_delivery` reports namespace-scoped
+pending counts and bytes. The default pending limits are 1,024 envelopes and
+256 MiB of encoded payloads; these do not cap lifetime receipt metadata or WAL.
+An unavailable native file does not prevent queued delivery. An unconfigured
+source remains queued until its matching registration is restored. If its whole
+namespace is outside the configured read scope, its backlog is also hidden.
 
 `backup` asks the daemon to create a private file under its `backups` directory.
 It uses SQLite's online backup API, checks SQLite integrity, foreign keys and every
@@ -158,6 +185,16 @@ ID so old cursors cannot be reused. It never changes a provider's files or repla
 an existing destination. Missing original transcripts remain browseable through
 configured namespaces. Corrupt backups or unsupported schema versions are refused.
 Schema-1 upgrades create a consistent recovery copy before applying schema 2.
+The archive backup does not include the independent [capture spool](CAPTURE-SPOOL-V1.md).
+The daemon drains pending envelopes before backup and refuses unresolved work
+with `capture_spool_pending`. The same guard applies to redaction. Schema-5
+upgrades retain a verified recovery copy before schema 6.
+
+A fresh archive restore starts with a fresh spool, seeded from its committed
+archive checkpoints. Never attach an old spool to a different archive instance;
+the daemon refuses that pairing. To preserve pending work for disaster recovery,
+stop the daemon and preserve the complete private data directory and configuration
+as a consistent unit, including both databases and any SQLite sidecars.
 
 ## Verification and current limits
 

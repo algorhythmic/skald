@@ -51,7 +51,7 @@ type Limits struct {
 	BatchBytes  int
 }
 
-func DefaultLimits() Limits { return Limits{Records: 256, RecordBytes: 4 << 20, BatchBytes: 16 << 20} }
+func DefaultLimits() Limits { return Limits{Records: 512, RecordBytes: 4 << 20, BatchBytes: 16 << 20} }
 
 type Gap struct {
 	Code       string `json:"code"`

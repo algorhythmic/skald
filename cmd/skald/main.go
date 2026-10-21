@@ -34,15 +34,18 @@ Archive commands:
   skald tui [--socket PATH] [--namespace ID] [--theme heimdall|desktop|amber]
   skald serve [--config FILE] [--data-dir DIRECTORY] [--socket PATH]
   skald status [--socket PATH] [--namespace ID]
+  skald capabilities [--socket PATH] [--namespace ID]
+  skald changes [--socket PATH] [--namespace ID] [--limit 25] [--cursor CURSOR]
   skald sessions [--socket PATH] [--namespace ID] [--limit 25] [--cursor CURSOR]
   skald artifacts --conversation KEY [--socket PATH] [--namespace ID] [--limit 25] [--cursor CURSOR]
   skald get --record KEY --revision DIGEST --adapter VERSION [--socket PATH] [--namespace ID] [--raw]
   skald backup [--socket PATH]
   skald restore --backup FILE --data-dir NEW_DIRECTORY
+  skald redact --namespace ID --scope source|conversation|record --target KEY [--socket PATH]
 
 Foundation commands (read-only):
   skald inspect --provider claude_code|codex|devin --namespace ID --stream-id ID --file FILE
-                [--conversation-id ID] [--checkpoint FILE] [--limit 256] [--raw]
+                [--conversation-id ID] [--checkpoint FILE] [--limit 512] [--raw]
   skald probe --provider claude_code|codex|devin --provider-version VERSION
   skald discover --root DIRECTORY [--limit 1000]
   skald validate --file RECORD.json
@@ -97,7 +100,7 @@ func run(args []string, out, stderr io.Writer) error {
 	conversation := f.String("conversation-id", "", "native ID assertion; verified against exposed source IDs")
 	checkpoint := f.String("checkpoint", "", "caller-owned checkpoint JSON")
 	root := f.String("root", "", "explicit source root")
-	limit := f.Int("limit", 256, "record/file bound")
+	limit := f.Int("limit", sessioncapture.DefaultLimits().Records, "record/file bound")
 	raw := f.Bool("raw", false, "include original bytes as base64")
 	if err := f.Parse(args[1:]); err != nil {
 		if err == flag.ErrHelp {

@@ -292,6 +292,19 @@ func (s *Store) get(ctx context.Context, ns []string, key, revision, adapter str
 		return out, errors.New("exact_record_revision_and_adapter_required")
 	}
 	in, args := scopeSQL(ns)
+	var namespace, conversation string
+	err := s.db.QueryRowContext(ctx, "SELECT namespace,conversation_key FROM artifacts WHERE namespace IN ("+in+") AND record_key=?", append(append([]any{}, args...), key)...).Scan(&namespace, &conversation)
+	if err != nil && err != sql.ErrNoRows {
+		return out, err
+	}
+	if err == nil {
+		if err := checkSuppression(ctx, s.db, namespace, conversation, key); err != nil {
+			if err.Error() == "capture_suppressed" {
+				return out, errors.New("evidence_redacted")
+			}
+			return out, err
+		}
+	}
 	args = append(args, key, revision, adapter)
 	var envelope string
 	var original []byte
@@ -299,7 +312,7 @@ func (s *Store) get(ctx context.Context, ns []string, key, revision, adapter str
  JOIN content_objects c ON c.digest=n.source_revision WHERE a.namespace IN (` + in + `)
  AND n.record_key=? AND n.source_revision=? AND n.adapter_version=?`
 	var envelopeBytes, originalBytes int64
-	err := s.db.QueryRowContext(ctx, "SELECT length(CAST(n.envelope_json AS BLOB)),c.byte_length"+join, args...).Scan(&envelopeBytes, &originalBytes)
+	err = s.db.QueryRowContext(ctx, "SELECT length(CAST(n.envelope_json AS BLOB)),c.byte_length"+join, args...).Scan(&envelopeBytes, &originalBytes)
 	if err == sql.ErrNoRows {
 		return out, errors.New("not_found")
 	}
@@ -405,7 +418,9 @@ func ErrorCode(err error) string {
 	}
 	// Storage/IO errors must not leak database paths or transcript text over API.
 	switch err.Error() {
-	case "not_found", "invalid_request", "invalid_cursor", "cursor_expired", "invalid_page_limit", "response_too_large", "scope_denied", "exact_record_revision_and_adapter_required", "capture_capacity_limit":
+	case "not_found", "invalid_request", "invalid_cursor", "cursor_expired", "invalid_page_limit", "response_too_large", "scope_denied", "exact_record_revision_and_adapter_required", "capture_capacity_limit",
+		"invalid_archive_feed_cursor", "archive_feed_cursor_expired", "unsupported_archive_feed_version", "evidence_redacted", "capture_spool_pending",
+		"redaction_target_required", "invalid_redaction_scope", "redaction_scope_mismatch", "redaction_target_unavailable":
 		return err.Error()
 	}
 	if strings.HasPrefix(err.Error(), "source_") {

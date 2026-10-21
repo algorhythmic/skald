@@ -3,6 +3,7 @@ package sessioncapture_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -218,6 +219,34 @@ func TestIdentityRequiredAndNativeAssertion(t *testing.T) {
 	}
 }
 
+func TestClaudeSidechainCannotEnterPrimaryStream(t *testing.T) {
+	s := source(sessioncapture.Claude)
+	s.ConversationID = "primary"
+	primary := []byte(`{"type":"user","sessionId":"primary","message":{"role":"user","content":"synthetic"}}` + "\n")
+	first := read(t, primary, s, sessioncapture.Checkpoint{})
+	for _, marker := range []string{`"isSidechain":true,`, `"agentId":"agent-1",`} {
+		tail := []byte("{" + marker + `"type":"assistant","sessionId":"primary","message":{"role":"assistant","content":"synthetic"}}` + "\n")
+		out := read(t, append(append([]byte{}, primary...), tail...), s, first.Checkpoint)
+		if !out.Blocked || out.Checkpoint != first.Checkpoint || len(out.Records) != 0 || len(out.Gaps) != 1 || out.Gaps[0].Code != "subagent_identity_unsupported" {
+			t.Fatalf("sidechain advanced primary checkpoint: %+v", out)
+		}
+	}
+}
+
+func TestCodexParentEvidenceAndCapabilityBoundaries(t *testing.T) {
+	s := source(sessioncapture.Codex)
+	raw := []byte(`{"type":"session_meta","payload":{"id":"synthetic-child","session_id":"synthetic-parent","cli_version":"0.153.4"}}` + "\n")
+	out := read(t, raw, s, sessioncapture.Checkpoint{})
+	var parent string
+	if len(out.Records) != 1 || json.Unmarshal(out.Records[0].Record.Extensions["native_parent"], &parent) != nil || parent != "synthetic-parent" {
+		t.Fatal("native parent evidence unavailable")
+	}
+	c := sessioncapture.Probe(sessioncapture.Codex, "0.153.4")
+	if c.NativeForks.State != "fixture_verified" || c.NativeSubagents.State != "unsupported" || c.ConversationAlias.State != "unsupported" {
+		t.Fatal("capability boundary overclaimed", c)
+	}
+}
+
 func TestCapabilitiesAndDiscovery(t *testing.T) {
 	c := sessioncapture.Probe(sessioncapture.Codex, "0.153.4")
 	if c.NativeRecap.State != "unsupported" || c.LiveCollection.State != "fixture_verified" {
@@ -234,6 +263,15 @@ func TestCapabilitiesAndDiscovery(t *testing.T) {
 		}
 	}
 	if err := os.Symlink(outside, filepath.Join(root, "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "subagents"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "subagents", "child.jsonl"), []byte("synthetic"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "agent-child.jsonl"), []byte("synthetic"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	paths, err := sessioncapture.Discover(root, 1)
@@ -300,5 +338,28 @@ func TestConcurrentRewriteRejectsCandidateBatch(t *testing.T) {
 	out, err := sessioncapture.Read(r, source(sessioncapture.Claude), sessioncapture.Checkpoint{}, sessioncapture.DefaultLimits(), clock)
 	if err == nil || err.Error() != "source_changed_during_read" || len(out.Records) != 0 {
 		t.Fatal("concurrent rewrite produced a committable batch")
+	}
+}
+
+func BenchmarkSyntheticBackfill(b *testing.B) {
+	line := []byte(`{"type":"assistant","sessionId":"synthetic-large","message":{"role":"assistant","content":"` + strings.Repeat("x", 992) + `"}}` + "\n")
+	raw := bytes.Repeat(line, 8192)
+	for _, records := range []int{256, 512} {
+		b.Run(fmt.Sprintf("records_%d", records), func(b *testing.B) {
+			limits := sessioncapture.DefaultLimits()
+			limits.Records = records
+			s := source(sessioncapture.Claude)
+			b.SetBytes(int64(len(raw)))
+			for n := 0; n < b.N; n++ {
+				var cp sessioncapture.Checkpoint
+				for cp.Offset < int64(len(raw)) {
+					batch, err := sessioncapture.Read(bytes.NewReader(raw), s, cp, limits, clock)
+					if err != nil || batch.Blocked || batch.Pending || batch.Checkpoint.Offset <= cp.Offset {
+						b.Fatalf("synthetic backfill stopped: %+v %v", batch, err)
+					}
+					cp = batch.Checkpoint
+				}
+			}
+		})
 	}
 }

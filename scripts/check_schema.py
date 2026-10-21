@@ -57,11 +57,17 @@ db.executescript((ROOT / "internal/archive/migrations/002_daemon.sql").read_text
 db.executescript((ROOT / "internal/archive/migrations/003_titles.sql").read_text())
 db.executescript((ROOT / "internal/archive/migrations/004_activity.sql").read_text())
 db.executescript((ROOT / "internal/archive/migrations/005_continuation.sql").read_text())
-assert db.execute("PRAGMA user_version").fetchone() == (5,)
+db.execute("INSERT INTO archive_meta VALUES (1,5,'synthetic-schema-check',1,NULL)")
+db.executescript((ROOT / "internal/archive/migrations/006_delivery.sql").read_text())
+assert db.execute("PRAGMA user_version").fetchone() == (6,)
+assert db.execute("SELECT schema_version FROM archive_meta").fetchone() == (6,)
 columns = [row[1] for row in db.execute("PRAGMA table_info(session_titles)")]
 assert "origin" in columns
 columns = [row[1] for row in db.execute("PRAGMA table_info(session_activity)")]
 assert "signal" in columns and "seen_time" in columns
 refuses("INSERT INTO session_titles VALUES ('session','first-occurrence',?, 'v1','t','stream',0,0,0,'invented')", (digest,))
+assert db.execute("SELECT count(*) FROM capture_receipts").fetchone() == (0,)
+assert db.execute("SELECT count(*) FROM redaction_receipts").fetchone() == (0,)
+assert db.execute("SELECT namespaces_json FROM archive_scope WHERE singleton=1").fetchone() == ("[]",)
 assert not db.execute("PRAGMA foreign_key_check").fetchall()
 print(f"SQLite {sqlite3.sqlite_version}: capture DDL, identity/scope constraints, immutable versions, normalization history, atomic checkpoint rollback, and daemon migrations pass")
