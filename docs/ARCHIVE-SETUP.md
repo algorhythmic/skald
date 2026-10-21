@@ -34,6 +34,10 @@ Use the exact keys/revisions/adapter from the preceding result. Add `--limit` an
 `--cursor` to page sessions or artifact references. Add `--namespace` to narrow
 reads to one configured namespace. The ready message means the socket is ready;
 `status` reports initial backfill and per-source progress separately.
+The live `checked_at` reflects the latest successful source check. Unchanged
+health heartbeats are persisted at most once a minute; state transitions and
+capture commits persist immediately. After a crash or restore, the durable
+check time can therefore be up to a minute older than the last live check.
 
 For a disposable or separate instance, choose both paths explicitly:
 
@@ -100,6 +104,10 @@ heads, source-order observations, gaps and change records commit together. Resta
 and duplicate delivery do not create new native versions. A malformed complete
 line is archived opaque with a retained gap; an incomplete final line waits for
 its newline. Oversized records and conflicting identities block before that line.
+Unchanged complete, partial and blocked files reuse their last verified result
+between one-minute prefix audits. Every poll still checks file identity, size,
+mtime and ctime, so an append, replacement or repair triggers immediate capture.
+Blocked tails retain their diagnostics and do not silently skip the blocked data.
 
 Source loss is an availability diagnostic. It does not delete history, fabricate
 an end signal, or complete a task. Session lists project archived lifecycle or

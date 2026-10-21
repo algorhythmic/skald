@@ -371,6 +371,10 @@ func (s *Store) health(ctx context.Context, ns []string) ([]SourceHealth, error)
 		if err := rows.Scan(&h.Key, &h.Namespace, &h.Provider, &h.Enrolled, &h.Health, &h.CheckedAt, &h.CheckpointAvailable, &h.Generation, &h.Epoch, &h.NextOrdinal, &h.CapturedOffset, &h.ParsedOffset, &h.HasGaps, &h.LastCapturedAt, &h.LastSourceTime); err != nil {
 			return nil, err
 		}
+		if check, ok := s.healthChecks[h.Key]; ok && check.health == h.Health {
+			checked := stamp(check.checkedAt)
+			h.CheckedAt = &checked
+		}
 		out = append(out, h)
 	}
 	return out, rows.Err()

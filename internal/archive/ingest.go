@@ -159,7 +159,11 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.healthChecks = nil
+	return nil
 }
 
 func (s *Store) Checkpoint(ctx context.Context, key string) (sessioncapture.Checkpoint, error) {
@@ -442,7 +446,11 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
 			return err
 		}
 	}
-	return capacityError(tx.Commit())
+	if err := tx.Commit(); err != nil {
+		return capacityError(err)
+	}
+	s.rememberHealth(r.Key(), health, now)
+	return nil
 }
 
 // activitySignal extracts a conversation activity signal from one record.
@@ -975,9 +983,38 @@ func setHealth(ctx context.Context, tx *sql.Tx, key, namespace, health string, n
 	}
 	return nil
 }
+
+// Persist periodic health heartbeats at most once a minute. Transitions remain
+// immediate; status reads use the latest successful in-memory check. This avoids
+// one FULL-synchronous SQLite write transaction per idle source per poll.
+const healthHeartbeat = time.Minute
+
+type healthCheck struct {
+	health      string
+	checkedAt   time.Time
+	persistedAt time.Time
+}
+
+func (s *Store) rememberHealth(key, health string, now time.Time) {
+	if s.healthChecks == nil {
+		s.healthChecks = make(map[string]healthCheck)
+	}
+	s.healthChecks[key] = healthCheck{health: health, checkedAt: now, persistedAt: now}
+}
+
 func (s *Store) SetHealth(ctx context.Context, r Registration, health string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if last, ok := s.healthChecks[r.Key()]; ok && last.health == health && !now.Before(last.persistedAt) && now.Sub(last.persistedAt) < healthHeartbeat {
+		if now.After(last.checkedAt) {
+			last.checkedAt = now
+		}
+		s.healthChecks[r.Key()] = last
+		return nil
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -986,7 +1023,11 @@ func (s *Store) SetHealth(ctx context.Context, r Registration, health string, no
 	if err := setHealth(ctx, tx, r.Key(), r.Namespace, health, now); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.rememberHealth(r.Key(), health, now)
+	return nil
 }
 
 func (s *Store) Stats(ctx context.Context, namespaces []string) (map[string]any, error) {

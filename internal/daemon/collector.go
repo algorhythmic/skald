@@ -81,14 +81,10 @@ func (c *Collector) Scan(ctx context.Context) bool {
 
 		stamp, stampErr := sourceStamp(source)
 		if cached, ok := c.verified[source.Key()]; ok && stampErr == nil && cached.Stamp == stamp && cached.Checkpoint == cp && time.Since(cached.At) < time.Minute {
-			health := "available"
-			if cp.HasGaps {
-				health = "capture_gaps"
-			}
-			if err := c.Store.SetHealth(ctx, source, health, time.Now()); err != nil {
+			if err := c.Store.SetHealth(ctx, source, cached.Health, time.Now()); err != nil {
 				c.issue(source.Key(), "archive_write_failed")
 			} else {
-				c.issue(source.Key(), "")
+				c.issue(source.Key(), cached.Issue)
 			}
 			continue
 		}
@@ -154,27 +150,56 @@ func (c *Collector) Scan(ctx context.Context) bool {
 			_ = c.Store.SetHealth(ctx, source, "blocked", time.Now())
 			continue
 		}
-		c.issue(source.Key(), "")
-		if batch.Blocked {
-			c.issue(source.Key(), "capture_blocked")
+		health, issue := captureHealth(batch)
+		// A durable receipt replay need not write the sink again, but this file
+		// observation can recover availability after an intervening source loss.
+		if err := c.Store.SetHealth(ctx, source, health, time.Now()); err != nil {
+			c.issue(source.Key(), "archive_write_failed")
+			continue
 		}
+		c.issue(source.Key(), issue)
 
 		consumed := batch.Checkpoint.Offset == stamp.Size
 		if source.Provider == sessioncapture.Devin {
 			// The canonical dump, not the file size, is the captured extent.
 			consumed = true
 		}
-		if !batch.More && !batch.Pending && !batch.Blocked && stampErr == nil && consumed {
+		// Stable partial and blocked tails cannot progress until the source
+		// changes. Cache their result too, while keeping the same periodic
+		// prefix audit and per-poll identity/size/mtime/ctime checks. A hot
+		// Devin WAL still needs its activity probe and quiet-window transition.
+		cacheable := !batch.More && (consumed || batch.Pending || batch.Blocked)
+		if source.Provider == sessioncapture.Devin && batch.Pending {
+			cacheable = false
+		}
+		if cacheable && stampErr == nil {
 			if after, err := sourceStamp(source); err == nil && after == stamp {
 				if c.verified == nil {
 					c.verified = map[string]verifiedFile{}
 				}
-				c.verified[source.Key()] = verifiedFile{Stamp: stamp, Checkpoint: batch.Checkpoint, At: time.Now()}
+				c.verified[source.Key()] = verifiedFile{Stamp: stamp, Checkpoint: batch.Checkpoint, At: time.Now(), Health: health, Issue: issue}
 			}
 		}
 		more = more || batch.More
 	}
 	return more
+}
+
+func captureHealth(batch sessioncapture.Batch) (health, issue string) {
+	health = "available"
+	if batch.Pending && !batch.SourceActive {
+		health = "partial_line"
+	}
+	if batch.More {
+		health = "backfilling"
+	}
+	if batch.Checkpoint.HasGaps {
+		health = "capture_gaps"
+	}
+	if batch.Blocked {
+		health, issue = "blocked", "capture_blocked"
+	}
+	return
 }
 
 // A producer checkpoint advances when the immutable envelope reaches the spool.

@@ -21,6 +21,8 @@ type verifiedFile struct {
 	Stamp      fileStamp
 	Checkpoint sessioncapture.Checkpoint
 	At         time.Time
+	Health     string
+	Issue      string
 }
 
 func sourceStamp(source archive.Registration) (fileStamp, error) {

@@ -9,11 +9,23 @@ history through the socket API. Retrieval and peer integrations remain future wo
 
 ## Remaining Odin producer batches — 2026-10-21
 
+An [idle polling performance investigation](docs/PERFORMANCE-RECEIPT-2026-10-21.md)
+subsequently reproduced high CPU and disk writes with no new capture data. The
+fix coalesces unchanged health heartbeats and caches stable blocked/partial
+tails while retaining change detection and periodic audits. Synthetic blocked-tail
+CPU fell from 28.6% to 2.7% of one core. The tested build was deployed locally on
+2026-10-21, preserving all 126,421 record versions through the schema 5→6 upgrade
+and retaining the old executable and a verified pre-upgrade archive copy.
+Live verification over 70 seconds measured storage writes at 0.554 MB/s, down
+from 6.24 MB/s (approximately 91%). CPU remained 35.5% of one core, down from
+43.9%; substantial read activity and CPU require further profiling. Capture
+backlog stayed empty and no records or change events were added during sampling.
+
 Three Sol implementation agents completed the archive feed, durable delivery,
 and capture/recovery batches, with integration and review in the standalone daemon.
 This completes the selected Skald implementation scope from the
 [producer plan](docs/ODIN-INTEGRATION-PLAN.md). It does not close the cross-repository
-OHS exits, live rollout, or the broader L0–L6 release gates.
+OHS exits, consumer rollout, or the broader L0–L6 release gates.
 
 - Added public `archivefeed` v1 and `changes`/`capabilities` commands. The metadata
   feed provides a fixed snapshot followed by tail pages, exact revision locators,
@@ -49,8 +61,10 @@ metadata-only replay, removed-source backlog, archive/spool mismatch, source los
 rewrite and reappearance, schema 5→6 recovery, redaction after restore, namespace
 isolation, bounded feed snapshot/tail, and standalone terminal restoration.
 Runtime checks used private synthetic data and required Unix socket/PTY sandbox
-access. The compiled binary reports archive schema 6. No live provider
-configuration, installed service, peer repository or task authority changed.
+access. The compiled binary reports archive schema 6. These implementation checks
+did not change live configuration or installed binaries. The later local daemon
+deployment is recorded in the performance investigation linked above; provider
+configuration, peer repositories and task authority remain unchanged.
 
 The spool's 1,024-envelope/256 MiB limits bound pending payloads, not lifetime
 SQLite metadata or WAL size. Removal is logical, not a physical erasure guarantee

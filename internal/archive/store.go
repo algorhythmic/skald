@@ -38,12 +38,13 @@ type Options struct {
 func DefaultOptions() Options { return Options{MaxDatabaseBytes: 4 << 30, MinFreeBytes: 256 << 20} }
 
 type Store struct {
-	mu       sync.Mutex
-	db       *sql.DB
-	lock     *os.File
-	dir      string
-	instance string
-	options  Options
+	mu           sync.Mutex
+	db           *sql.DB
+	lock         *os.File
+	dir          string
+	instance     string
+	options      Options
+	healthChecks map[string]healthCheck
 }
 
 func NewID() string {
