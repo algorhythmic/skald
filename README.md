@@ -2,7 +2,7 @@
 
 An archive of Claude Code, Codex and Devin conversations, kept with exact provenance so past context can be found and trusted.
 
-Conversations are scattered across tools and can be rewritten or deleted. Skald keeps selected source bytes alongside normalized records, exposes gaps and rewrites, and serves exact reads through a terminal UI and CLI. It does not install hooks or change provider settings.
+Conversations are scattered across tools and can be rewritten or deleted. Skald keeps selected source bytes alongside normalized records, exposes gaps and rewrites, and serves exact reads through a terminal UI, CLI and scoped read-only MCP server. Capture does not install provider hooks.
 
 **Evidence:** [archive tests](internal/archive/), [capture tests](sessioncapture/) and [recorded verification](STATUS.md) · session-list p95 of 49 ms over 20,000 synthetic records ([measurement](docs/ARCHIVE-BENCHMARK.json)).
 
@@ -26,7 +26,7 @@ make build
 
 ## Status and limits
 
-Local archive, browsing, exact reads, backup and restore work on Linux. Claude Code, Codex and Devin support is checked against samples, not every provider version. Braid retrieval, read-only MCP and portable exports are planned. Browser/cloud conversations and subagent transcripts are not covered. The latency result is a small local benchmark; storage growth remains a release concern. [Full status](STATUS.md).
+Local archive, browsing, exact reads, read-only MCP, backup and restore work on Linux. Claude Code child transcripts can be enabled per root. Provider support is checked against samples, not every version. Braid retrieval, other provider subagents and portable exports remain planned; browser/cloud conversations are not covered. The latency result is a small local benchmark; storage growth remains a release concern. [Full status](STATUS.md).
 
 ---
 
@@ -48,6 +48,7 @@ history with `skald tui`. See [TUI usage](docs/TUI.md),
 [archive setup](docs/ARCHIVE-SETUP.md) and [implementation status](STATUS.md).
 
 - [Connect real conversation sources](docs/SOURCES.md)
+- [Give agents scoped MCP reads](docs/AGENT-READS.md)
 - [Implementation plan](SKALD-IMPLEMENTATION-PLAN.md)
 - [Odin integration: scope, first batch and producer release gates](docs/ODIN-INTEGRATION-PLAN.md)
 - [Heimdall amendment — historical consumer policy](SKALD-HEIMDALL-AMENDMENT.md)
@@ -139,11 +140,11 @@ transcripts, contact Heimdall or make summarization/embedding requests.
 
 ## Compatibility and validation details
 
-**Works with:** Claude Code, Codex (CLI and desktop) and Devin desktop as conversation sources. Read-only local samples confirmed the Claude Code 2.1.263 and Codex 0.153.4 file formats and 13 Devin desktop session stores. Agents cannot query Skald over MCP yet; read-only MCP is planned.
+**Works with:** Claude Code, Codex (CLI and desktop) and Devin desktop as conversation sources. Read-only local samples confirmed the Claude Code 2.1.263 and Codex 0.153.4 primary file formats and 13 Devin desktop session stores. Native Claude child identity was also inspected in 2.1.296 and 2.1.303 samples. Agents can use seven [MCP read tools](docs/AGENT-READS.md) within explicitly granted namespaces.
 
-- **Works today (Linux):** sole-writer archive daemon, source connection for Claude Code, Codex and Devin desktop, backfill and tailing with explicit gaps, a terminal UI for browsing projects, recaps and transcript history, exact historical reads, and online backup with fresh-directory restore.
-- **Planned:** Braid retrieval and read-only MCP for agents; archive-wide descriptions and fresher activity selection; published capture delivery and archive-change contracts for Odin; optional external task read enrichment; portable exports.
-- **Not covered:** browser/cloud conversations, subagent transcripts, and fork/alias tracking across conversations. Provider support is checked against samples, not proven complete.
+- **Works today (Linux):** sole-writer archive daemon, source connection for Claude Code, Codex and Devin desktop, opt-in Claude child capture with native parent links, backfill and tailing with explicit gaps, terminal browsing, scoped MCP reads, exact historical reads, and online backup with fresh-directory restore.
+- **Planned:** Braid retrieval; archive-wide descriptions and fresher activity selection; tagged capture delivery and archive-change contracts for Odin; optional external task read enrichment; portable exports.
+- **Not covered:** browser/cloud conversations, other provider subagents, and general fork/alias tracking across conversations. Provider support is checked against samples, not proven complete.
 - **What the numbers do not prove:** there is no CI workflow in this repository; recorded local checks do not close the full release gates. The latency figure is one small-record local run on warm caches and includes CLI start-up and socket transport. The same run stored 26.81× the source bytes, so storage growth on large transcripts is still a release concern.
 
 Full detail: [STATUS.md](STATUS.md).

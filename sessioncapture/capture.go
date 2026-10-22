@@ -110,6 +110,19 @@ func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 	if limits.Records < 1 || limits.Records > 10000 || limits.RecordBytes < 1 || limits.RecordBytes > 64<<20 || limits.BatchBytes < limits.RecordBytes || limits.BatchBytes > 128<<20 {
 		return out, errors.New("invalid_limits")
 	}
+	var childContext claudeChildContext
+	if source.Provider == Claude && isClaudeSubagentConversation(source.ConversationID) {
+		needsProbe, err := needsClaudeForkProbe(input)
+		if err != nil {
+			return out, err
+		}
+		if needsProbe {
+			childContext, err = probeClaudeChild(input, source)
+			if err != nil {
+				return out, err
+			}
+		}
+	}
 	cp := previous
 	if cp.Version != 0 {
 		if cp.Version != 1 || cp.SourceKey != sourceKey(source) || cp.Offset < 0 || cp.Ordinal < 0 || cp.Epoch < 0 || cp.ParsedOffset < 0 || cp.ParsedOffset > cp.Offset || !sessionrecord.ValidDigest(cp.PrefixDigest) || (cp.Offset > 0 && cp.Generation == "") {
@@ -169,7 +182,7 @@ func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		if cp.Generation == "" {
 			cp.Generation = sessionrecord.Key("generation", cp.SourceKey, strconv.FormatInt(cp.Epoch, 10), sessionrecord.Digest(line))
 		}
-		r, code, err := normalize(line, source, &cp, now)
+		r, code, err := normalize(line, source, &cp, now, childContext)
 		if err != nil {
 			out.Gaps = append(out.Gaps, Gap{Code: err.Error(), Offset: cp.Offset, Ordinal: cp.Ordinal, Generation: cp.Generation})
 			out.Blocked = true

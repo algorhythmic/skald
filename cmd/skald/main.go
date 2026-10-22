@@ -26,8 +26,8 @@ Start here:
   skald [tui flags]        start the archive daemon if needed and open the TUI
 
 Source connection:
-  skald sources --provider claude_code|codex|devin [--root DIRECTORY] [--since RFC3339|all] [--limit 10]
-  skald connect --provider claude_code|codex|devin [--root DIRECTORY] [--config FILE]
+  skald sources --provider claude_code|codex|devin [--root DIRECTORY] [--since RFC3339|all] [--limit 10] [--include-subagents]
+  skald connect --provider claude_code|codex|devin [--root DIRECTORY] [--config FILE] [--include-subagents]
                 [--namespace ID] [--since RFC3339|all] [--max-sessions 64]
 
 Archive commands:
@@ -42,6 +42,7 @@ Archive commands:
   skald backup [--socket PATH]
   skald restore --backup FILE --data-dir NEW_DIRECTORY
   skald redact --namespace ID --scope source|conversation|record --target KEY [--socket PATH]
+  skald mcp --socket PATH --namespace ID [--namespace ID ...] [--allow-raw]
 
 Foundation commands (read-only):
   skald inspect --provider claude_code|codex|devin --namespace ID --stream-id ID --file FILE
@@ -86,6 +87,9 @@ func run(args []string, out, stderr io.Writer) error {
 	}
 	if args[0] == "tui" {
 		return runTUI(args[1:], stderr, false)
+	}
+	if args[0] == "mcp" {
+		return runMCP(args[1:], os.Stdin, out, stderr)
 	}
 	if isArchiveCommand(args[0]) {
 		return runArchive(args, out, stderr)

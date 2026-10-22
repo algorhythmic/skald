@@ -4,8 +4,8 @@ Skald now has a foreground Linux daemon and CLI reads. It collects explicitly
 configured Claude/Codex JSONL files, independently archives their original bytes,
 and keeps working without Heimdall, Braid, Herdr or a model provider. The native
 [TUI](TUI.md) browses this archive. [Source connection](SOURCES.md) enrolls primary
-conversations within selected roots; subagent discovery and agent-facing MCP
-remain later work.
+conversations and optional native Claude children within selected roots.
+[Read-only MCP](AGENT-READS.md) exposes the archive to agents with explicit grants.
 
 ## Start with synthetic sources
 
@@ -92,9 +92,10 @@ last configured entry for a namespace also removes it from the active read corpu
 There is no default scan of home directories, hook installation or source activation.
 
 `sources --provider PROVIDER` previews native identity metadata. `connect` saves
-a root for periodic enrollment of newly created primary conversations. `discover
---root DIRECTORY` remains a generic filename inventory. Verified native subagent/
-fork/alias discovery remains future work.
+a root for periodic enrollment of newly created primary conversations. Claude
+roots can enable `--include-subagents`. `discover --root DIRECTORY` remains a
+generic filename inventory. Other provider subagents and general fork/alias
+discovery remain future work.
 
 ## Capture and reads
 
@@ -129,7 +130,8 @@ records and oversized responses are distinct errors. Defaults expose normalized
 content; original bytes additionally require `allow_raw: true` in the daemon
 configuration and `get --raw` for that read. Raw bytes are base64 in JSON.
 Terminal controls and bidi formatting are escaped in CLI output without changing
-round-trip content. These are local CLI interfaces, not the future scoped MCP grants.
+round-trip content. The [MCP interface](AGENT-READS.md) adds fixed namespace grants
+and smaller response bounds to these daemon reads.
 
 Pages bind archive instance, namespace scope, ordering and committed boundary.
 Any intervening archive change returns `cursor_expired`, requiring a fresh first

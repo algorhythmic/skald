@@ -137,7 +137,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, map[string]any{
 			"contracts":      map[string]int{"sessionrecord": 1, "capture_delivery": sessioncapture.DeliveryVersion, "archive_feed": archivefeed.Version, "redaction_receipt": 1},
 			"archive_schema": archive.SchemaVersion, "archive_instance": status["archive_instance"], "namespaces": ns,
-			"features":    []string{"exact_revision_reads", "archive_snapshot_and_tail", "durable_capture_spool", "independent_destination_receipts", "logical_content_removal"},
+			"features":    []string{"exact_revision_reads", "archive_snapshot_and_tail", "durable_capture_spool", "independent_destination_receipts", "logical_content_removal", "scoped_read_only_mcp", "opt_in_claude_subagents"},
 			"unsupported": []string{"remote_destination_transport", "odin_consumer", "physical_media_erasure"},
 		}, nil)
 	case "/v1/changes":

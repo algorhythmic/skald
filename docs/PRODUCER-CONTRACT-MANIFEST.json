@@ -17,6 +17,7 @@
     "testdata/capture-delivery/unsupported-v2.json": "sha256:4fbc1a248c4fb852a295d35092ce445797b854c8c2cabf2f36978cfdf05a061a",
     "testdata/capture-spool/scenarios-v1.json": "sha256:b96a12db223eb6f68094d7e07d7adffa67c20ce9c11d52e4db314a4957de6585",
     "testdata/claude/session.jsonl": "sha256:373252a1634aedf600f98763c7bcb68350e1fd7ee35fa0d05a3d8e88686afd9c",
+    "testdata/claude/subagent.jsonl": "sha256:8568d31e495e652a2b0bc31b7d9e0739402c55e68b02e5f41daa8cb9313350e5",
     "testdata/codex/session.jsonl": "sha256:c32940169b5ea98a51bd9a714bd76bbd2f9685e1be385ef39f1286c569eabc20",
     "testdata/identity-v1.json": "sha256:0d393f2bad50baf1535331d0d325aef6d137a2a1eec2a81495bd2b9d29c1bdea",
     "testdata/redaction-receipt/receipt-v1.json": "sha256:49d1e17aefdd3b97b379443f53291cf231c85909ed913e3e9c52098462180f26"

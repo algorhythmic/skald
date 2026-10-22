@@ -16,6 +16,7 @@ FILES = (
     "schemas/redaction-receipt-v1.schema.json",
     "testdata/identity-v1.json",
     "testdata/claude/session.jsonl",
+    "testdata/claude/subagent.jsonl",
     "testdata/codex/session.jsonl",
     "testdata/capture-delivery/accepted-v1.json",
     "testdata/capture-delivery/unsupported-v2.json",

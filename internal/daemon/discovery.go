@@ -16,17 +16,18 @@ import (
 )
 
 type DiscoveryStatus struct {
-	ModifiedSince time.Time         `json:"modified_since"`
-	Namespace     string            `json:"namespace"`
-	Provider      string            `json:"provider"`
-	Root          string            `json:"root"`
-	State         string            `json:"state"`
-	CheckedAt     time.Time         `json:"checked_at"`
-	Candidates    int               `json:"candidates"`
-	Enrolled      int               `json:"enrolled"`
-	MaxSessions   int               `json:"max_sessions"`
-	Rejected      int               `json:"rejected"`
-	Issues        map[string]string `json:"issues"`
+	ModifiedSince    time.Time         `json:"modified_since"`
+	Namespace        string            `json:"namespace"`
+	Provider         string            `json:"provider"`
+	Root             string            `json:"root"`
+	State            string            `json:"state"`
+	CheckedAt        time.Time         `json:"checked_at"`
+	Candidates       int               `json:"candidates"`
+	Enrolled         int               `json:"enrolled"`
+	MaxSessions      int               `json:"max_sessions"`
+	IncludeSubagents bool              `json:"include_subagents"`
+	Rejected         int               `json:"rejected"`
+	Issues           map[string]string `json:"issues"`
 }
 
 // Initialize reconciles the explicit configuration with persisted enrollment.
@@ -50,15 +51,22 @@ func (c *Collector) Initialize(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if len(stored) > root.MaxSessions {
-			return errors.New("discovery_capacity_below_enrolled_count")
-		}
+		selected := 0
 		for _, r := range stored {
 			if r.Provider != root.Provider {
 				return errors.New("namespace_provider_conflict")
 			}
 			if r.Root != root.Root && !slices.Contains(root.RootAliases, r.Root) {
 				return errors.New("root_relocation_requires_explicit_alias")
+			}
+			// Opting out stops child polling without deleting archived evidence.
+			// Identity survives relocation, so the path is not the discriminator.
+			if !root.IncludeSubagents && r.Provider == sessioncapture.Claude && sessioncapture.IsClaudeSubagentConversation(r.ConversationID) {
+				continue
+			}
+			selected++
+			if selected > root.MaxSessions {
+				return errors.New("discovery_capacity_below_enrolled_count")
 			}
 			r.Root = root.Root
 			r.RootAliases = append([]string{}, root.RootAliases...)
@@ -88,7 +96,7 @@ func (c *Collector) DiscoveryStatus() []DiscoveryStatus {
 	for _, r := range c.Config.Discovery {
 		s, ok := c.discovery[r.Namespace]
 		if !ok {
-			s = DiscoveryStatus{Namespace: r.Namespace, Provider: r.Provider, Root: r.Root, ModifiedSince: r.ModifiedSince, State: "pending", MaxSessions: r.MaxSessions}
+			s = DiscoveryStatus{Namespace: r.Namespace, Provider: r.Provider, Root: r.Root, ModifiedSince: r.ModifiedSince, State: "pending", MaxSessions: r.MaxSessions, IncludeSubagents: r.IncludeSubagents}
 		}
 		issues := map[string]string{}
 		for path, code := range s.Issues {
@@ -110,7 +118,7 @@ func (c *Collector) discover(ctx context.Context) {
 	c.lastDiscovery = now
 	sources := c.Sources()
 	for _, root := range c.Config.Discovery {
-		status := DiscoveryStatus{Namespace: root.Namespace, Provider: root.Provider, Root: root.Root, ModifiedSince: root.ModifiedSince, State: "available", CheckedAt: now, MaxSessions: root.MaxSessions, Issues: map[string]string{}}
+		status := DiscoveryStatus{Namespace: root.Namespace, Provider: root.Provider, Root: root.Root, ModifiedSince: root.ModifiedSince, State: "available", CheckedAt: now, MaxSessions: root.MaxSessions, IncludeSubagents: root.IncludeSubagents, Issues: map[string]string{}}
 		reject := func(path, code string) {
 			status.Rejected++
 			if len(status.Issues) < 16 {
@@ -127,7 +135,8 @@ func (c *Collector) discover(ctx context.Context) {
 				status.Enrolled++
 			}
 		}
-		candidates, err := sessioncapture.Inventory(ctx, root.Root, root.Provider, root.ModifiedSince, 100000)
+		options := sessioncapture.InventoryOptions{IncludeClaudeSubagents: root.IncludeSubagents}
+		candidates, err := sessioncapture.InventoryWithOptions(ctx, root.Root, root.Provider, root.ModifiedSince, 100000, options)
 		if err != nil {
 			status.State = "unavailable"
 			status.Issues["root"] = discoveryError(err)
@@ -161,7 +170,7 @@ func (c *Collector) discover(ctx context.Context) {
 					break
 				}
 				probes++
-				identity, err := sessioncapture.Identify(ctx, root.Root, candidate.Path, root.Provider)
+				identity, err := sessioncapture.IdentifyWithOptions(ctx, root.Root, candidate.Path, root.Provider, options)
 				if err != nil {
 					reject(candidate.Path, discoveryError(err))
 					continue

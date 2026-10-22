@@ -1,0 +1,3 @@
+{"type":"user","uuid":"shared-native-uuid","sessionId":"synthetic-parent","isSidechain":true,"agentId":"a1234567890abcde","version":"2.1.303","cwd":"/fixtures/skald","parentUuid":null,"timestamp":"2026-10-20T10:00:00Z","message":{"role":"user","content":"Synthetic child request."}}
+{"type":"attachment","uuid":"synthetic-attachment","sessionId":"synthetic-parent","isSidechain":true,"agentId":"a1234567890abcde","version":"2.1.303","timestamp":"2026-10-20T10:00:01Z","attachment":{"kind":"synthetic"}}
+{"type":"assistant","uuid":"synthetic-child-answer","sessionId":"synthetic-parent","isSidechain":true,"agentId":"a1234567890abcde","version":"2.1.303","timestamp":"2026-10-20T10:00:02Z","message":{"role":"assistant","content":"Synthetic child response."}}

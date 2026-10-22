@@ -61,6 +61,7 @@ func runConnect(args []string, out, stderr io.Writer) error {
 	since := f.String("since", "", "include files modified since RFC3339 timestamp or all; new connections default to seven days ago")
 	limit := f.Int("limit", 10, "maximum source metadata previews (1–64)")
 	capacity := f.Int("max-sessions", 64, "maximum enrolled files for this root (total configured capacity ≤256)")
+	includeSubagents := f.Bool("include-subagents", false, "include native Claude subagent transcripts with verified identity")
 	previous := f.String("previous-root", "", "explicit former root for an intentional relocation; requires --namespace")
 	if err := f.Parse(args[1:]); err != nil {
 		if err == flag.ErrHelp {
@@ -73,6 +74,9 @@ func runConnect(args []string, out, stderr io.Writer) error {
 	}
 	if *provider != sessioncapture.Claude && *provider != sessioncapture.Codex && *provider != sessioncapture.Devin {
 		return errors.New("supported_provider_required")
+	}
+	if *includeSubagents && *provider != sessioncapture.Claude {
+		return errors.New("subagent_discovery_requires_claude")
 	}
 	visited := map[string]bool{}
 	f.Visit(func(v *flag.Flag) { visited[v.Name] = true })
@@ -116,7 +120,8 @@ func runConnect(args []string, out, stderr io.Writer) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if args[0] == "sources" {
-		candidates, err := sessioncapture.Inventory(ctx, canonical, *provider, cutoff, 100000)
+		options := sessioncapture.InventoryOptions{IncludeClaudeSubagents: *includeSubagents}
+		candidates, err := sessioncapture.InventoryWithOptions(ctx, canonical, *provider, cutoff, 100000, options)
 		if err != nil {
 			return err
 		}
@@ -127,7 +132,7 @@ func runConnect(args []string, out, stderr io.Writer) error {
 		items := []sourcePreview{}
 		for _, c := range candidates[:min(*limit, len(candidates))] {
 			item := sourcePreview{Candidate: c}
-			identity, err := sessioncapture.Identify(ctx, canonical, c.Path, *provider)
+			identity, err := sessioncapture.IdentifyWithOptions(ctx, canonical, c.Path, *provider, options)
 			if err != nil {
 				item.Error = err.Error()
 			} else {
@@ -153,7 +158,7 @@ func runConnect(args []string, out, stderr io.Writer) error {
 	if *previous != "" && *namespace == "" {
 		return errors.New("relocation_requires_namespace")
 	}
-	result := daemon.DiscoveryRoot{Namespace: *namespace, Provider: *provider, Root: canonical, ModifiedSince: cutoff, MaxSessions: *capacity}
+	result := daemon.DiscoveryRoot{Namespace: *namespace, Provider: *provider, Root: canonical, ModifiedSince: cutoff, MaxSessions: *capacity, IncludeSubagents: *includeSubagents}
 	if *previous != "" {
 		alias, err := filepath.Abs(*previous)
 		if err != nil {
@@ -183,6 +188,9 @@ func runConnect(args []string, out, stderr io.Writer) error {
 			}
 			if !visited["max-sessions"] {
 				result.MaxSessions = existing.MaxSessions
+			}
+			if !visited["include-subagents"] {
+				result.IncludeSubagents = existing.IncludeSubagents
 			}
 			aliases := append(append([]string{}, existing.RootAliases...), result.RootAliases...)
 			result.RootAliases = nil

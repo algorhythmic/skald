@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
 
@@ -34,6 +35,7 @@ type Session struct {
 	Namespace              string             `json:"namespace"`
 	Provider               string             `json:"provider"`
 	NativeID               string             `json:"native_id"`
+	IsSubagent             bool               `json:"is_subagent"`
 	Title                  string             `json:"title"`
 	TitleRef               *sessionrecord.Ref `json:"title_ref,omitempty"`
 	TitleKind              string             `json:"title_kind,omitempty"`
@@ -130,10 +132,10 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
  coalesce(title.title,s.native_id),coalesce(title.record_key,''),coalesce(title.source_revision,''),coalesce(title.origin,''),coalesce(title.ordering_ambiguous,0),
  (SELECT count(*) FROM artifact_versions v JOIN artifacts a USING(record_key) WHERE a.conversation_key=s.conversation_key),
  CASE WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='available') THEN 'available'
- WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health='blocked') THEN 'blocked'
- WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health='capture_gaps') THEN 'capture_gaps'
- WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health NOT IN ('unavailable','unknown')) THEN 'partial'
- WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.active=1 AND l.health='unknown') THEN 'unknown'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='blocked') THEN 'blocked'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='capture_gaps') THEN 'capture_gaps'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health NOT IN ('unavailable','unknown')) THEN 'partial'
+ WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='unknown') THEN 'unknown'
  ELSE 'unavailable' END,
  coalesce(act.signal,''),coalesce(act.signal_epoch,-1),coalesce(act.signal_ordinal,-1),
  coalesce(act.seen_epoch,-1),coalesce(act.seen_ordinal,-1),act.seen_time,coalesce(act.ordering_ambiguous,0)
@@ -155,6 +157,7 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
 		if err := rows.Scan(&item.Key, &item.Namespace, &item.Provider, &item.NativeID, &item.Title, &titleKey, &titleRevision, &item.TitleKind, &item.TitleOrderingAmbiguous, &item.RecordVersions, &item.SourceHealth, &signal, &sigEpoch, &sigOrd, &seenEpoch, &seenOrd, &seenTime, &actAmbiguous); err != nil {
 			return result, err
 		}
+		item.IsSubagent = item.Provider == sessioncapture.Claude && sessioncapture.IsClaudeSubagentConversation(item.NativeID)
 		if titleKey != "" {
 			item.TitleRef = &sessionrecord.Ref{RecordKey: titleKey, SourceRevision: titleRevision}
 		}
@@ -356,8 +359,8 @@ func (s *Store) health(ctx context.Context, ns []string) ([]SourceHealth, error)
  (SELECT o.observed_at FROM record_observations o
   WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 LIMIT 1),
  (SELECT n.source_time FROM record_observations o JOIN normalizations n
-  ON n.record_key=o.record_key AND n.source_revision=o.source_revision AND n.adapter_version=src.adapter_version
-  WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 LIMIT 1)
+  ON n.record_key=o.record_key AND n.source_revision=o.source_revision
+  WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 ORDER BY n.rowid DESC LIMIT 1)
  FROM stream_locators l JOIN streams st USING(stream_key) JOIN sources src USING(namespace)
  LEFT JOIN ingest_checkpoints cp USING(stream_key)
  WHERE st.namespace IN (`+in+`) AND l.active=1 ORDER BY st.stream_key LIMIT 256`, args...)

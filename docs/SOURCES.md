@@ -1,7 +1,8 @@
 # Connecting local conversation data
 
-Skald can now enroll primary Claude Code transcripts and local Codex rollouts,
+Skald enrolls primary Claude Code transcripts and local Codex rollouts,
 including Codex desktop conversations that persist in the same native format.
+Native Claude child transcripts are an explicit per-root option.
 Collection is read-only at the source. The archive and discovery registry survive
 source removal and daemon restarts.
 
@@ -75,7 +76,36 @@ visible, and no partial walk is claimed as complete. Up to 64 new-file identity
 probes run per root per pass, with rotating retries so incomplete/unsupported
 files cannot permanently starve older valid candidates. Each probe examines at
 most 256 complete records / 4 MiB. Subagent paths and native sidechain markers are
-excluded pending a separate verified subagent identity contract.
+excluded by default. Claude child enrollment requires the option below.
+
+### Claude subagent transcripts
+
+Preview and enable children for a selected Claude profile:
+
+```sh
+./bin/skald sources --provider claude_code --root /path/to/profile/projects \
+  --include-subagents --since all --limit 64
+./bin/skald connect --provider claude_code --root /path/to/profile/projects \
+  --include-subagents --since all --max-sessions 72
+```
+
+This saves `include_subagents: true` on that discovery entry. Restart the daemon
+to apply it. The option is rejected for other providers. Repeating `connect`
+preserves the setting unless explicitly changed with `--include-subagents=false`.
+Children consume the same root and global enrollment capacity as primary sessions.
+
+Child identity requires native `sessionId`, `agentId` and `isSidechain: true`
+evidence. A filename alone cannot identify a child. The pair of parent session ID
+and agent ID derives a distinct conversation ID, so reused message IDs cannot
+merge parent and child records. Normalized records retain a `native_subagent_of`
+parent relation and native identity metadata. Session rows expose `is_subagent`.
+Primary streams still reject sidechain records. See the [record contract](CONTRACT-V1.md).
+
+The native child layout and identity fields were inspected in Claude Code
+2.1.296 and 2.1.303 samples; committed tests use synthetic data. Unsupported or
+conflicting identity remains a visible capture failure. Disabling the option
+stops child polling while retaining its archived history under the same namespace.
+This allows capacity to be reduced to the remaining primary registrations.
 
 Namespaces are generated from provider, stable host identity and canonical root,
 then saved. Use `--namespace ID` to share an existing namespace deliberately.
@@ -144,10 +174,10 @@ changing a cutoff or capacity, or removing a root. Removing a namespace from the
 configuration removes it from the active read corpus but retains its archived
 records. Keep an unavailable root configured to continue browsing its history.
 
-Complete, unchanged files avoid full prefix reads on ordinary idle polls. The
+Unchanged complete, partial and blocked files avoid full prefix reads on ordinary idle polls. The
 collector checks device, inode, size, mtime and ctime every pass and performs a full
 prefix audit at least once per minute when the source is scanned. Any detected
-change, restart, pending tail or backfill requires ordinary prefix verification.
+change, restart or backfill requires ordinary prefix verification.
 The cache is in memory only and never advances a checkpoint. Large changing
 transcripts still pay full-prefix hashing and remain a performance release gate.
 
@@ -168,7 +198,7 @@ returned ordinary messages from both and a Claude recap without blocked records
 or gaps in those samples. This is sample evidence, not a claim of complete
 provider coverage. Personal conversation bodies are not saved as test fixtures.
 
-Subagent/fork/alias coverage, encrypted/ephemeral recap extraction, browser/cloud
+Other provider subagents, general fork/alias coverage, encrypted/ephemeral recap extraction, browser/cloud
 sources, fresh activity selection, archive-wide descriptions, retention and
 broader scale/recovery gates remain separate work. No integration here requires
 Heimdall, Braid, Herdr, a provider hook, or a summarization request.

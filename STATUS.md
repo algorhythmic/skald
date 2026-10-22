@@ -1,11 +1,48 @@
 # Skald implementation status
 
 Updated 2026-10-21. **The Skald-owned OHS producer implementation batches are complete and verified locally.**
-Skald can now enroll primary conversations in selected Claude/Codex roots and
+Skald can now enroll primary conversations and optional Claude children in selected roots and
 Devin desktop session stores (`acp-messages` SQLite),
 retain independent history, serve bounded reads, and back up/restore its archive.
 The TUI browses project groups, bounded excerpts, native recaps and transcript
-history through the socket API. Retrieval and peer integrations remain future work. The full release gates below remain open.
+history through the socket API. Seven scoped MCP tools expose bounded reads to
+agents. Ranked retrieval and peer integrations remain future work. The full release gates below remain open.
+
+## Native Claude children and agent reads — 2026-10-21
+
+Two Sol implementation agents completed native Claude child capture and a scoped
+read-only MCP adapter, with an independent Sol review and daemon integration.
+
+- `include_subagents` is a per-Claude-root opt-in, also exposed by `sources` and
+  `connect`. Native parent session ID, agent ID and sidechain evidence derive a
+  separate child conversation identity. Records keep exact source bytes, a
+  versioned child normalization and `native_subagent_of` relations. Primary
+  streams continue rejecting sidechains. Existing delivery/checkpoint wire shapes
+  and archive schema 6 are unchanged.
+- Restart resumes persisted child streams. Disabling child capture retains
+  history and stops polling it. Session rows identify children; source health and
+  native timestamps are associated with the correct conversation and adapter.
+- `skald mcp` provides seven bounded read tools through an existing daemon, with
+  explicit namespace grants, revision citations and provenance on tool results.
+  Default transcript context omits system/developer instructions. Raw reads need
+  two opt-ins. No mutations, SQL, arbitrary paths or commands are exposed.
+- Metadata-only local inspection found native Claude child shapes in 2.1.296 and
+  2.1.303. Committed fixtures are synthetic. This evidence does not establish all
+  capabilities in either provider release.
+
+See [agent reads](docs/AGENT-READS.md), [source setup](docs/SOURCES.md) and the
+[record identity contract](docs/CONTRACT-V1.md). General fork/alias tracking,
+other provider subagents and ranked Braid retrieval remain separate capabilities.
+
+Verification: `make check smoke tui-smoke discovery-smoke mcp-smoke`, full race
+tests and a final capture/daemon race rerun pass. A metadata-only live inventory
+identified 54 native children and eight primary Odin sessions; complete child
+reads consumed 9,554 records with zero gaps, blocks or pending tails. The tested
+binary is installed, child discovery is enabled for the dedicated Odin root,
+and that Claude profile has a connected MCP registration granting only its
+namespace. The deployment preserves schema 6 and the existing archive instance;
+the prior binary/configuration and Claude configuration are backed up privately.
+See the [deployment receipt](docs/AGENT-READS-RECEIPT-2026-10-21.md).
 
 ## Remaining Odin producer batches — 2026-10-21
 
@@ -227,9 +264,9 @@ Large native transcripts still incur repeated full-prefix hashing per batch.
 
 1. Publish and pin the new producer bundle, then run Odin consumer fixtures and
    record supported installed-provider capabilities. Existing `v0.1.0`/`v0.1.1`
-   tags predate these interfaces. Native parent evidence and explicit unsupported
-   subagent/alias cases are fixture-covered; full enrollment/projection support
-   and broader provider verification remain separate release capabilities.
+   tags predate these interfaces. Native Claude child capture is implemented;
+   other provider subagents, general aliases and broader provider verification
+   remain separate release capabilities.
 2. Measure and improve large-transcript backfill/tailing and storage growth. Test
    extended disk-pressure and migration/recovery scenarios. Keep current explicit
    capacity and coverage diagnostics; do not claim full L1 release acceptance yet.
@@ -237,7 +274,7 @@ Large native transcripts still incur repeated full-prefix hashing per batch.
    projections, fresh activity-evidence selection, Herdr/local groups and verified
    source activation. Current descriptions use a labeled 25-record window; filter
    and transcript find are page-local. Wider release acceptance remains open.
-4. Implement L3 Braid retrieval and scoped read-only MCP, followed by optional peer,
+4. Complete L3 Braid retrieval beyond the delivered scoped read-only MCP, followed by optional peer,
    surface and portable-preservation integrations under their existing milestones.
 
 Local read-only metadata and bounded parsing samples verified Claude 2.1.263 and

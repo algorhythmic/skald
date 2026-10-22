@@ -21,22 +21,51 @@ func textPtr(s string) *string {
 	return &s
 }
 
-func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time) (sessionrecord.Record, string, error) {
+func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time, childContext claudeChildContext) (sessionrecord.Record, string, error) {
 	var native object
 	malformed := !utf8.Valid(raw) || json.Unmarshal(raw, &native) != nil || native == nil
 	id, nativeID, nativeKind := "", "", "unknown"
+	var claudeID claudeNativeIdentity
+	registeredChild := source.Provider == Claude && isClaudeSubagentConversation(source.ConversationID)
 	if !malformed {
 		nativeKind = str(native, "type")
 		if nativeKind == "" {
 			nativeKind = "unknown"
 		}
 		if source.Provider == Claude {
-			var sidechain bool
-			_ = json.Unmarshal(native["isSidechain"], &sidechain)
-			if sidechain || str(native, "agentId") != "" {
-				return sessionrecord.Record{}, "", errors.New("subagent_identity_unsupported")
+			var err error
+			claudeID, err = claudeIdentity(native)
+			if err != nil {
+				return sessionrecord.Record{}, "", err
 			}
-			id, nativeID = str(native, "sessionId"), str(native, "uuid")
+			if claudeID.child {
+				if !registeredChild || source.ConversationID != claudeID.conversationID() {
+					return sessionrecord.Record{}, "", errors.New("subagent_identity_unsupported")
+				}
+				if childContext.parent != "" && (claudeID.parent != childContext.parent || claudeID.agent != childContext.agent) {
+					return sessionrecord.Record{}, "", errors.New("conversation_identity_mismatch")
+				}
+				childContext = claudeChildContext{parent: claudeID.parent, agent: claudeID.agent}
+			} else if claudeID.control {
+				if !registeredChild {
+					return sessionrecord.Record{}, "", errors.New("subagent_identity_unsupported")
+				}
+				if claudeID.parent != "" {
+					if claudeID.conversationID() != source.ConversationID {
+						return sessionrecord.Record{}, "", errors.New("conversation_identity_mismatch")
+					}
+					childContext = claudeChildContext{parent: claudeID.parent, agent: claudeID.agent}
+				}
+				if childContext.parent == "" || claudeID.agent != childContext.agent || (claudeID.parent != "" && claudeID.parent != childContext.parent) {
+					return sessionrecord.Record{}, "", errors.New("conversation_identity_mismatch")
+				}
+			} else if registeredChild && claudeID.known {
+				return sessionrecord.Record{}, "", errors.New("conversation_identity_mismatch")
+			}
+			id, nativeID = claudeID.conversationID(), str(native, "uuid")
+			if claudeID.control {
+				id = source.ConversationID
+			}
 			if v := str(native, "version"); v != "" {
 				cp.ProviderVersion = v
 			}
@@ -82,6 +111,29 @@ func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time) (sessio
 		SourceOrder: &sessionrecord.Order{StreamGeneration: cp.Generation, Ordinal: cp.Ordinal},
 		Coverage:    sessionrecord.Coverage{Kind: "unknown"}, Provenance: sessionrecord.Provenance{Kind: "native", Producer: source.Provider},
 		Relations: []sessionrecord.Relation{}, Availability: sessionrecord.Availability{State: "available"},
+	}
+	if registeredChild {
+		r.AdapterVersion = ClaudeSubagentAdapterVersion
+	}
+	if claudeID.child || claudeID.control {
+		parent := sessionrecord.Conversation(source.Namespace, childContext.parent)
+		evidence := "native_sessionId_agentId_isSidechain"
+		if claudeID.control {
+			evidence = "native_agentId_verified_by_sidechain"
+		}
+		r.Relations = append(r.Relations, sessionrecord.Relation{Type: "native_subagent_of", Target: sessionrecord.Scope{Kind: "conversation", Key: parent}, Evidence: evidence})
+		r.Extensions = map[string]json.RawMessage{
+			"native_agent_id": native["agentId"],
+		}
+		if v, ok := native["sessionId"]; ok {
+			r.Extensions["native_parent_session_id"] = v
+		}
+		if v, ok := native["isSidechain"]; ok {
+			r.Extensions["native_is_sidechain"] = v
+		}
+		if parentUUID, ok := native["parentUuid"]; ok {
+			r.Extensions["native_parent_uuid"] = parentUUID
+		}
 	}
 	r.RawRef = &sessionrecord.Ref{RecordKey: key, SourceRevision: r.SourceRevision}
 	if malformed {
@@ -146,7 +198,10 @@ func normalizeClaude(n object, r *sessionrecord.Record) {
 		}
 	}
 	if cwd := str(n, "cwd"); cwd != "" {
-		r.Extensions = map[string]json.RawMessage{"native_cwd": n["cwd"]}
+		if r.Extensions == nil {
+			r.Extensions = map[string]json.RawMessage{}
+		}
+		r.Extensions["native_cwd"] = n["cwd"]
 	}
 }
 

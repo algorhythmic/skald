@@ -68,3 +68,62 @@ func TestConnectPreviewPersistsScopeAndDoesNotCollect(t *testing.T) {
 		t.Fatal("connect started collection")
 	}
 }
+
+func TestConnectSubagentOptInPersistsAndCanBeRevoked(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "parent", "subagents", "agent-child.jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"type":"user","isSidechain":true,"sessionId":"parent","agentId":"child","version":"2.1.303","message":{"role":"user","content":"PRIVATE CHILD SENTINEL"}}` + "\n"
+	if err := os.WriteFile(path, []byte(raw), 0600); err != nil {
+		t.Fatal(err)
+	}
+	var out, stderr bytes.Buffer
+	preview := []string{"sources", "--provider", "claude_code", "--root", root, "--since", "all"}
+	if err := run(preview, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	var result struct {
+		Candidates int `json:"candidates"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Candidates != 0 {
+		t.Fatal("default preview included children", out.String(), err)
+	}
+	out.Reset()
+	if err := run(append(preview, "--include-subagents"), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil || result.Candidates != 1 || strings.Contains(out.String(), "PRIVATE CHILD SENTINEL") {
+		t.Fatal("bad child preview", out.String(), err)
+	}
+	config := filepath.Join(t.TempDir(), "sources.json")
+	args := []string{"connect", "--provider", "claude_code", "--root", root, "--config", config, "--namespace", "fixture:children", "--since", "all", "--max-sessions", "4"}
+	if err := run(append(args, "--include-subagents"), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(args, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := daemon.LoadConfig(config)
+	if err != nil || !cfg.Discovery[0].IncludeSubagents {
+		t.Fatal("repeat connection lost opt-in", cfg, err)
+	}
+	if err := run(append(args, "--include-subagents=false"), &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = daemon.LoadConfig(config)
+	if err != nil || cfg.Discovery[0].IncludeSubagents {
+		t.Fatal("opt-out ignored", cfg, err)
+	}
+	if err := run([]string{"connect", "--provider", "codex", "--root", root, "--config", config, "--include-subagents"}, &out, &stderr); err == nil || err.Error() != "subagent_discovery_requires_claude" {
+		t.Fatal("unsupported provider option accepted", err)
+	}
+	if err := daemon.UpdateConfig(config, func(c *daemon.Config) error {
+		c.Discovery[0].Provider = "codex"
+		c.Discovery[0].IncludeSubagents = true
+		return nil
+	}); err == nil {
+		t.Fatal("unsupported config accepted")
+	}
+}

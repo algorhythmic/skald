@@ -26,8 +26,10 @@ recovery or preserve it separately.
 
 Current capability claims remain narrow. Claude Code and Codex ordinary
 content use synthetic fixtures for the identified versions; Devin uses the
-`acp-messages` store fixture. Claude sidechains and native subagent
-enrollment are explicitly unsupported. Codex `session_meta.session_id`
+`acp-messages` store fixture. Native Claude children now have opt-in enrollment,
+distinct derived conversation IDs and native parent relations; primary streams
+continue rejecting sidechains. Child identity fixtures cover sampled Claude
+2.1.296 and 2.1.303 shapes. Codex `session_meta.session_id`
 supplies fixture-verified parent evidence, but relationship projection and
 conversation aliases are unavailable. Native browser/cloud collection,
 provider hooks and live surface activation are unavailable. Native provider

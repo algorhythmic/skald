@@ -44,6 +44,9 @@ func Probe(provider, version string) Capabilities {
 		c.NativeRecap = Capability{State: "fixture_verified", Reason: "system_away_summary_content"}
 		c.LiveCollection = Capability{State: "fixture_verified", Reason: "configured_file_tail_and_restart_tests"}
 	}
+	if provider == Claude && (version == "2.1.303" || version == "2.1.296") {
+		c.NativeSubagents = Capability{State: "fixture_verified", Reason: "native_sidechain_agent_session_identity_and_child_capture"}
+	}
 	if provider == Codex && version == "0.153.4" {
 		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "codex_response_item"}
 		c.NativeRecap = Capability{State: "unsupported", Reason: "native_tui_recap_not_persisted"}

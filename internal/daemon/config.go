@@ -15,12 +15,13 @@ import (
 )
 
 type DiscoveryRoot struct {
-	Namespace     string    `json:"namespace"`
-	Provider      string    `json:"provider"`
-	Root          string    `json:"root"`
-	RootAliases   []string  `json:"root_aliases,omitempty"`
-	ModifiedSince time.Time `json:"modified_since"`
-	MaxSessions   int       `json:"max_sessions"`
+	Namespace        string    `json:"namespace"`
+	Provider         string    `json:"provider"`
+	Root             string    `json:"root"`
+	RootAliases      []string  `json:"root_aliases,omitempty"`
+	ModifiedSince    time.Time `json:"modified_since"`
+	MaxSessions      int       `json:"max_sessions"`
+	IncludeSubagents bool      `json:"include_subagents,omitempty"`
 }
 type Config struct {
 	Discovery        []DiscoveryRoot        `json:"discovery,omitempty"`
@@ -90,6 +91,9 @@ func LoadConfig(path string) (Config, error) {
 	}
 	for i := range cfg.Discovery {
 		r := &cfg.Discovery[i]
+		if r.IncludeSubagents && r.Provider != sessioncapture.Claude {
+			return cfg, errors.New("subagent_discovery_requires_claude")
+		}
 		if r.Namespace == "" || len(r.Namespace) > 256 || r.Root == "" || r.MaxSessions < 1 || r.MaxSessions > 256 || len(r.RootAliases) > 16 || (r.Provider != sessioncapture.Claude && r.Provider != sessioncapture.Codex && r.Provider != sessioncapture.Devin) {
 			return cfg, errors.New("invalid_discovery_configuration")
 		}

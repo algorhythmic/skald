@@ -35,6 +35,7 @@ ambiguous concatenations. Fields larger than uint32 are outside the contract.
 | `record` without native ID | origin kind, origin key, `ordinal`, verified generation, decimal zero-based ordinal |
 | `stream` | namespace, provider, configured persistent logical stream ID |
 | `generation` | stream key, decimal rewrite epoch, digest of the first complete native line |
+| `claude-subagent` | native parent session ID, native agent ID |
 
 A configured namespace override is authoritative and is returned verbatim. Each
 consumer must use the same namespace and logical stream token for the same native
@@ -71,6 +72,37 @@ are the display-content stream; event-message mirrors stay opaque to avoid
 showing one reply twice. Turn completion is idle evidence, never conversation end.
 Compaction text does not automatically become an eligible native conversation
 recap. No source claims recap coverage solely from a timestamp or nearby turn.
+
+### Native Claude children
+
+Opt-in Claude child discovery requires `sessionId`, `agentId` and
+`isSidechain: true` in native records. The child's provider-local conversation ID
+is `Key("claude-subagent", sessionId, agentId)`; its conversation key then uses
+the ordinary `Conversation(namespace, childID)` encoding. Filenames and directory
+names do not establish identity. `Source.ConversationID` explicitly pins this
+derived child ID, using the existing Source/checkpoint/delivery-v1 wire shape.
+
+Child normalization uses `claude-subagent-jsonl-v1.0.0`, leaving the primary
+adapter version unchanged. Records carrying native child evidence include the
+relation `native_subagent_of` targeting `Conversation(namespace, sessionId)`,
+with evidence `native_sessionId_agentId_isSidechain`. Extensions retain
+`native_parent_session_id`, `native_agent_id`, `native_is_sidechain`, and exposed
+`native_parent_uuid`. The relation is conversation ancestry, not accepted task
+delegation or proof that the parent has been archived.
+
+Identity-free metadata can be retained opaque under an explicitly registered
+child. Malformed lines retain the ordinary gap semantics; neither case invents
+per-record native parent evidence. Primary or sibling identity inside a child,
+incomplete child markers, and sidechain records inside a primary stream block
+before consumption. A child-looking path containing primary records is rejected
+by opt-in discovery. Compatibility evidence covers sampled Claude 2.1.296 and
+2.1.303 child shapes, not every provider feature in those releases.
+
+Claude control records (`api-request`, `api-request-blob`, `api-request-shape`,
+and `fork-context-ref`) may omit the sidechain marker. They remain opaque and
+must match the proven child's available native identity fields; they cannot
+establish child identity on their own. Agent-only context references require
+bounded verification against native child evidence in the stream.
 
 ## Checkpoint boundary
 

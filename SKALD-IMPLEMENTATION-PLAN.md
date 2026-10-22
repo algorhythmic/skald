@@ -626,8 +626,11 @@ are escaped in display while original bytes remain in the archive.
 The following operations are proposed, with common bounded pagination and
 structured errors. The current CLI and bounded archive reads are documented in
 [README.md](README.md) and [STATUS.md](STATUS.md). This table describes intended
-interfaces, not the list of implemented RPC methods: `changes.read`, retrieval
-and MCP remain separate work. Internal change rows are not a public change feed.
+interfaces, not the list of implemented RPC methods. The public `archivefeed` v1
+now implements scoped `changes.read`, and the [MCP adapter](docs/AGENT-READS.md)
+exposes seven bounded read tools, including `transcript.read` for known
+conversations. Ranked `context.query`, Braid publication and the remaining L3
+acceptance gates are still pending.
 
 | Operation | Result |
 | --- | --- |
