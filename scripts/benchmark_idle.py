@@ -31,7 +31,7 @@ def main():
     parser.add_argument('--prefix-mib', type=int, default=8)
     parser.add_argument('--work-dir', type=Path, help='existing directory on the filesystem to measure (default: system temporary directory)')
     args = parser.parse_args()
-    if not 0 <= args.blocked <= args.sessions <= 256 or args.sessions < 1 or not 0 < args.seconds <= 300 or not 1 <= args.prefix_mib <= 32:
+    if not 0 <= args.blocked <= args.sessions <= 4096 or args.sessions < 1 or not 0 < args.seconds <= 300 or not 1 <= args.prefix_mib <= 32:
         parser.error('invalid bounded workload')
     with tempfile.TemporaryDirectory(prefix='skald-idle-', dir=args.work_dir) as directory:
         work = Path(directory)

@@ -1,0 +1,5 @@
+# Merge this fragment into the EXISTING Prometheus configuration on .21.
+# Copy alerts.yml to this path, then validate/reload that existing service.
+# Existing Prometheus must keep --web.enable-remote-write-receiver enabled.
+rule_files:
+  - /etc/prometheus/skald-alerts.yml

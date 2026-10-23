@@ -21,11 +21,12 @@ func textPtr(s string) *string {
 	return &s
 }
 
-func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time, childContext claudeChildContext) (sessionrecord.Record, string, error) {
+func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time, childContext claudeChildContext, codexContext codexForkContext) (sessionrecord.Record, string, error) {
 	var native object
 	malformed := !utf8.Valid(raw) || json.Unmarshal(raw, &native) != nil || native == nil
 	id, nativeID, nativeKind := "", "", "unknown"
 	var claudeID claudeNativeIdentity
+	var codexMeta codexMetadata
 	registeredChild := source.Provider == Claude && isClaudeSubagentConversation(source.ConversationID)
 	if !malformed {
 		nativeKind = str(native, "type")
@@ -82,9 +83,22 @@ func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time, childCo
 			id = source.ConversationID
 		} else if nativeKind == "session_meta" {
 			p := obj(native, "payload")
-			id = str(p, "id")
-			if v := str(p, "cli_version"); v != "" {
-				cp.ProviderVersion = v
+			var err error
+			codexMeta, err = codexSessionMetadata(native)
+			if err != nil {
+				return sessionrecord.Record{}, "", err
+			}
+			if err := codexContext.validate(codexMeta, cp.ConversationID); err != nil {
+				return sessionrecord.Record{}, "", err
+			}
+			id = codexMeta.id
+			if codexContext.root != "" && id != "" {
+				id = codexContext.root
+			}
+			if codexMeta.id == id {
+				if v := str(p, "cli_version"); v != "" {
+					cp.ProviderVersion = v
+				}
 			}
 		}
 	}
@@ -114,6 +128,17 @@ func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time, childCo
 	}
 	if registeredChild {
 		r.AdapterVersion = ClaudeSubagentAdapterVersion
+	}
+	if source.Provider == Codex && codexContext.parents[codexContext.root] != "" {
+		r.AdapterVersion = CodexForkAdapterVersion
+	}
+	if source.Provider == Codex && codexContext.root == cp.ConversationID && codexContext.parents[codexContext.root] != "" {
+		parent := sessionrecord.Conversation(source.Namespace, codexContext.parents[codexContext.root])
+		evidence := "bounded_native_forked_from_id_prefix"
+		if codexMeta.id == cp.ConversationID && codexMeta.parent != "" {
+			evidence = "native_forked_from_id"
+		}
+		r.Relations = append(r.Relations, sessionrecord.Relation{Type: "native_fork_of", Target: sessionrecord.Scope{Kind: "conversation", Key: parent}, Evidence: evidence})
 	}
 	if claudeID.child || claudeID.control {
 		parent := sessionrecord.Conversation(source.Namespace, childContext.parent)
@@ -212,14 +237,29 @@ func normalizeCodex(n object, r *sessionrecord.Record) {
 		// Metadata proves identity and cwd, not a live session-start observation.
 		// A distinct session_id is the parent thread of a compaction-resume file.
 		r.Extensions = map[string]json.RawMessage{}
+		prefix := "native_"
+		fork := r.AdapterVersion == CodexForkAdapterVersion
+		if fork && r.ConversationKey != nil && *r.ConversationKey != sessionrecord.Conversation(r.SourceNamespace, str(p, "id")) {
+			// Copied metadata is evidence about its original ancestor, not
+			// project attribution or continuation-title evidence for this child.
+			prefix = "native_inherited_"
+		}
 		for _, k := range []string{"cwd", "originator", "source"} {
 			if v, ok := p[k]; ok {
-				r.Extensions["native_"+k] = v
+				r.Extensions[prefix+k] = v
+			}
+		}
+		if fork {
+			if v, ok := p["id"]; ok {
+				r.Extensions["native_session_id"] = v
+			}
+			if v, ok := p["forked_from_id"]; ok {
+				r.Extensions["native_forked_from_id"] = v
 			}
 		}
 		if parent := str(p, "session_id"); parent != "" && parent != str(p, "id") {
 			if v, err := json.Marshal(parent); err == nil {
-				r.Extensions["native_parent"] = v
+				r.Extensions[prefix+"parent"] = v
 			}
 		}
 	case "response_item":

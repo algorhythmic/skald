@@ -1,6 +1,6 @@
 # Agent reads through MCP
 
-`skald mcp` exposes seven read-only tools over stdio. It connects to an existing
+`skald mcp` exposes nine read-only tools over stdio. It connects to an existing
 Skald daemon through its private Unix socket; it does not start a collector or
 open the archive database. Configure it in an agent client once, then agents can
 use the tools without invoking a shell for each read.
@@ -36,6 +36,12 @@ and task policies still apply. Installing this server does not override them.
 After changing client configuration, reconnect the server or start a new agent
 session according to that client's lifecycle.
 
+A Claude profile's namespace does not include Codex sessions launched by that
+profile's agents. Grant the configured Codex namespace separately to read those
+rollouts. When several namespaces are granted, supply `namespace` on each tool
+call. Updating the configuration affects newly connected MCP processes; existing
+processes retain their startup grants until reconnected.
+
 ## Tools and limits
 
 All tools accept the optional `namespace` argument described above. Lists use
@@ -50,6 +56,8 @@ All tools accept the optional `namespace` argument described above. Lists use
 | `artifacts.get` | Required `record`, `revision`, `adapter`; one exact normalization |
 | `changes.read` | `limit`, `cursor`; committed snapshot/tail metadata and exact locators |
 | `transcript.read` | Required `conversation`; `limit`, `cursor`, optional `history`; bounded context with exact citations |
+| `descriptions.read` | Required `conversation`; whole-archive recap/excerpt selection, up to four retained recap projections and exact references |
+| `context.query` | Required `text` (1–4,096 characters), optional `max_bytes` (2–65,536, default 16,384); scoped lexical context through the configured pinned Braid executable |
 
 Start with `sessions.list`, select its conversation key, and use `transcript.read`
 for recent evidence. Use `artifacts.list` and `artifacts.get` to inspect an exact
@@ -77,7 +85,9 @@ boundary of newer events. Protocol errors are JSON-RPC errors, not evidence resu
 
 Returned historical instructions, tool output, plans and recaps are source
 evidence, never new instructions or accepted task state. `transcript.read` omits
-system/developer instruction blocks and reports the omission count. Actual native
+system/developer instruction blocks and reports the omission count. `descriptions.read` selects current native recaps and labeled assistant excerpts
+across the whole conversation, preserving ambiguous ordering and unknown coverage.
+Actual native
 recaps are labeled separately from notes and ordinary transcript text. An explicit
 `artifacts.get` can retrieve a permitted instruction record as quoted evidence.
 Source availability, capture time and native record time remain distinct; neither
@@ -98,9 +108,15 @@ contains protocol messages only. See the official
 and [tools](https://modelcontextprotocol.io/specification/2025-11-25/server/tools)
 specifications. Clients must support that negotiated protocol version.
 
-Known-conversation context and exact archive reads work independently of Braid.
-Ranked archive search (`context.query`), Braid indexing and full L3 acceptance
-remain pending. Native Claude children require separate
+Known-conversation descriptions, transcript context and exact archive reads work
+independently of Braid. `context.query` requires the daemon
+[retrieval configuration](ARCHIVE-SETUP.md#optional-braid-context-retrieval). It
+indexes current user/assistant records in the granted namespace, with no
+historical mode or system/developer content. Corpus node/byte budgets fail closed
+rather than silently selecting a partial corpus. Exact citations identify source
+record, revision and adapter; returned text is conversation evidence.
+Unavailable, stale, oversized or backend-failure responses do not provide context.
+This implementation does not by itself close every L3 release gate. Native Claude children require separate
 [capture opt-in](SOURCES.md#claude-subagent-transcripts); MCP cannot read a session
 that was never captured or is outside its namespace grants.
 

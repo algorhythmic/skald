@@ -50,6 +50,9 @@ func (s *Store) Enroll(ctx context.Context, registrations []Registration) error 
 	return s.register(ctx, registrations, false)
 }
 func (s *Store) register(ctx context.Context, registrations []Registration, replace bool) error {
+	if len(registrations) > MaxEnrolledSources {
+		return errors.New("source_registry_limit")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -147,6 +150,14 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
    ON CONFLICT(stream_key) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,active=1,health='unknown'`, r.Key(), r.Root, r.Path, r.ConversationID); err != nil {
 			return err
 		}
+	}
+	// Bound the selected capture corpus, retaining inactive archived streams.
+	var active int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM stream_locators WHERE active=1").Scan(&active); err != nil {
+		return err
+	}
+	if active > MaxEnrolledSources {
+		return errors.New("source_registry_limit")
 	}
 	// Source removal is an availability event; archived evidence remains readable.
 	for key, namespace := range removed {
@@ -299,7 +310,7 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
 		if suppressed > 0 {
 			return errors.New("capture_suppressed")
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO content_objects VALUES (?,?,'application/jsonl',?) ON CONFLICT DO NOTHING", rec.SourceRevision, len(item.Raw), item.Raw); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO content_objects VALUES (?,?,'application/jsonl',?)", rec.SourceRevision, len(item.Raw), item.Raw); err != nil {
 			return capacityError(err)
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO artifacts VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", rec.RecordKey, r.Namespace, rec.OriginScope.Kind, rec.OriginScope.Key, *rec.ConversationKey); err != nil {
@@ -312,7 +323,7 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
 		if rec.SourceTime != nil {
 			sourceTime = stamp(*rec.SourceTime)
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO normalizations VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING", rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, rec.ContractVersion, rec.Kind, sourceTime, rec.SourceOrder.StreamGeneration, rec.SourceOrder.Ordinal, encode(rec)); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO normalizations VALUES (?,?,?,?,?,?,?,?,?)", rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, rec.ContractVersion, rec.Kind, sourceTime, rec.SourceOrder.StreamGeneration, rec.SourceOrder.Ordinal, encode(rec)); err != nil {
 			return capacityError(err)
 		}
 		result, err := tx.ExecContext(ctx, "INSERT INTO record_observations VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING", r.Key(), cp.Generation, rec.SourceOrder.Ordinal, rec.RecordKey, rec.SourceRevision, stamp(now))
@@ -1003,12 +1014,23 @@ func (s *Store) rememberHealth(key, health string, now time.Time) {
 }
 
 func (s *Store) SetHealth(ctx context.Context, r Registration, health string, now time.Time) error {
+	return s.observeHealth(ctx, r, health, now, false)
+}
+
+// ObserveHealth keeps successful checks fresh in memory and commits transitions
+// immediately. Unchanged periodic heartbeats are grouped by FlushHealth, which
+// the collector calls at the end of each scan, including a canceled scan.
+func (s *Store) ObserveHealth(ctx context.Context, r Registration, health string, now time.Time) error {
+	return s.observeHealth(ctx, r, health, now, true)
+}
+
+func (s *Store) observeHealth(ctx context.Context, r Registration, health string, now time.Time, batchHeartbeat bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if last, ok := s.healthChecks[r.Key()]; ok && last.health == health && !now.Before(last.persistedAt) && now.Sub(last.persistedAt) < healthHeartbeat {
+	if last, ok := s.healthChecks[r.Key()]; ok && last.health == health && !now.Before(last.persistedAt) && (batchHeartbeat || now.Sub(last.persistedAt) < healthHeartbeat) {
 		if now.After(last.checkedAt) {
 			last.checkedAt = now
 		}
@@ -1030,18 +1052,107 @@ func (s *Store) SetHealth(ctx context.Context, r Registration, health string, no
 	return nil
 }
 
+// FlushHealth persists all due unchanged heartbeats in one transaction. Failed
+// commits leave their durable timestamps unchanged and observations retryable.
+// Backups and restart expose only committed timestamps, as with SetHealth.
+func (s *Store) FlushHealth(ctx context.Context) error {
+	_, err := s.FlushHealthBatch(ctx)
+	return err
+}
+
+// HealthHeartbeatError identifies checks whose grouped heartbeat did not
+// commit. Keys are for scoped status reporting; Error never exposes source
+// identities or underlying SQLite details. Unwrap preserves error matching.
+type HealthHeartbeatError struct {
+	Keys []string
+	Err  error
+}
+
+func (e *HealthHeartbeatError) Error() string { return "health_heartbeat_failed" }
+func (e *HealthHeartbeatError) Unwrap() error { return e.Err }
+
+// FlushHealthBatch reports the number of heartbeats committed together. Zero
+// means no write transaction was needed, or the transaction failed.
+func (s *Store) FlushHealthBatch(ctx context.Context) (count int, finalErr error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var due []string
+	for key, check := range s.healthChecks {
+		if check.checkedAt.Sub(check.persistedAt) >= healthHeartbeat {
+			due = append(due, key)
+		}
+	}
+	defer func() {
+		if finalErr != nil && len(due) > 0 {
+			finalErr = &HealthHeartbeatError{Keys: due, Err: finalErr}
+		}
+	}()
+	if err := ctx.Err(); err != nil {
+		return 0, err
+	}
+	if len(due) == 0 {
+		return 0, nil
+	}
+	slices.Sort(due)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	for _, key := range due {
+		check := s.healthChecks[key]
+		if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET checked_at=? WHERE stream_key=? AND health=?", stamp(check.checkedAt), key, check.health); err != nil {
+			return 0, capacityError(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, capacityError(err)
+	}
+	for _, key := range due {
+		check := s.healthChecks[key]
+		check.persistedAt = check.checkedAt
+		s.healthChecks[key] = check
+	}
+	return len(due), nil
+}
+
 func (s *Store) Stats(ctx context.Context, namespaces []string) (map[string]any, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stats(ctx, namespaces)
 }
+
+// CROSS JOIN fixes the loop order: scope artifacts through its covering index,
+// then count their versions through the version primary key. Without this,
+// SQLite can scan every version and fetch an artifact table page for each one.
+const scopedVersionCountSQL = "SELECT count(*) FROM artifacts a CROSS JOIN artifact_versions v USING(record_key) WHERE a.namespace IN ("
+
+func (s *Store) recordVersionCount(ctx context.Context, in string, args []any) (int64, error) {
+	// Check persisted sources, including retired namespaces that retain history.
+	// An empty scope produces IN (NULL), which must never grant the full count.
+	var allSources bool
+	if err := s.db.QueryRowContext(ctx, "SELECT NOT EXISTS(SELECT 1 FROM sources WHERE (namespace IN ("+in+")) IS NOT TRUE)", args...).Scan(&allSources); err != nil {
+		return 0, err
+	}
+	query := scopedVersionCountSQL + in + ")"
+	if allSources {
+		// SQLite's direct count walks compact index pages without a join or a
+		// row-by-row aggregate. It is safe only when scope covers all history.
+		query, args = "SELECT count(*) FROM artifact_versions", nil
+	}
+	var count int64
+	err := s.db.QueryRowContext(ctx, query, args...).Scan(&count)
+	return count, err
+}
+
 func (s *Store) stats(ctx context.Context, namespaces []string) (map[string]any, error) {
 	in, args := scopeSQL(namespaces)
-	var sessions, versions int64
+	var sessions int64
 	if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM sessions WHERE namespace IN ("+in+")", args...).Scan(&sessions); err != nil {
 		return nil, err
 	}
-	if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM artifact_versions v JOIN artifacts a USING(record_key) WHERE a.namespace IN ("+in+")", args...).Scan(&versions); err != nil {
+	versions, err := s.recordVersionCount(ctx, in, args)
+	if err != nil {
 		return nil, err
 	}
 	boundary, err := s.boundary()

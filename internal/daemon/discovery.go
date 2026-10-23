@@ -47,7 +47,7 @@ func (c *Collector) Initialize(ctx context.Context) error {
 	}
 	sources := append([]archive.Registration{}, c.Config.Sources...)
 	for _, root := range c.Config.Discovery {
-		stored, err := c.Store.Registrations(ctx, root.Namespace)
+		stored, err := c.Store.DiscoveryRegistrations(ctx, root.Namespace, root.IncludeSubagents)
 		if err != nil {
 			return err
 		}
@@ -124,7 +124,9 @@ func (c *Collector) discover(ctx context.Context) {
 			if len(status.Issues) < 16 {
 				status.Issues[path] = code
 			}
-			status.State = "partial"
+			if status.State != "capacity_reached" {
+				status.State = "partial"
+			}
 		}
 		known := map[string]int{}
 		identities := map[string][]int{}
@@ -166,7 +168,9 @@ func (c *Collector) discover(ctx context.Context) {
 						c.discoveryCursor = map[string]int{}
 					}
 					c.discoveryCursor[root.Namespace] = (start + probes) % len(pending)
-					status.State = "probe_limit"
+					if status.State != "capacity_reached" {
+						status.State = "probe_limit"
+					}
 					break
 				}
 				probes++

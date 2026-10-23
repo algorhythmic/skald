@@ -1,0 +1,158 @@
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+tests:
+  - name: sustained resource and capture issues fire
+    interval: 1m
+    input_series:
+      - series: 'skald_scans_total{job="skald"}'
+        values: '0+1x75'
+      - series: 'process_cpu_time_seconds_total{job="skald"}'
+        values: '0+30x75'
+      - series: 'process_memory_usage_bytes{job="skald"}'
+        values: '600000000+0x75'
+      - series: 'skald_data_allocated_bytes{job="skald"}'
+        values: '0+20000000x75'
+      - series: 'skald_capture_pending{job="skald"}'
+        values: '1+0x75'
+      - series: 'skald_sources_blocked{job="skald"}'
+        values: '1+0x75'
+      - series: 'skald_sources_unavailable{job="skald"}'
+        values: '1+0x75'
+      - series: 'skald_filesystem_free_bytes{job="skald"}'
+        values: '100000000+0x75'
+      - series: 'skald_database_allocated_bytes{job="skald"}'
+        values: '950+0x75'
+      - series: 'skald_max_database_bytes{job="skald"}'
+        values: '1000+0x75'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: SkaldCPUHigh
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald has used more than a quarter of a CPU core for five minutes
+      - eval_time: 70m
+        alertname: SkaldMemoryHigh
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald resident memory exceeds 512 MiB
+      - eval_time: 70m
+        alertname: SkaldDataGrowingFast
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald data allocation grew by more than 512 MiB per hour
+      - eval_time: 70m
+        alertname: SkaldCaptureBacklog
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald capture work has remained pending for ten minutes
+      - eval_time: 70m
+        alertname: SkaldCaptureBlocked
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald has a blocked capture source
+      - eval_time: 70m
+        alertname: SkaldSourceUnavailable
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald has an unavailable source
+      - eval_time: 70m
+        alertname: SkaldFilesystemLow
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald filesystem has less than 512 MiB available
+      - eval_time: 70m
+        alertname: SkaldDatabaseNearLimit
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Skald database allocation exceeds 90 percent of its capture limit
+      - eval_time: 70m
+        alertname: SkaldMetricsMissing
+        exp_alerts: []
+  - name: missing export is visible
+    interval: 1m
+    input_series: []
+    alert_rule_test:
+      - eval_time: 6m
+        alertname: SkaldMetricsMissing
+        exp_alerts:
+          - exp_labels:
+              job: skald
+              severity: warning
+            exp_annotations:
+              summary: Prometheus has received no Skald metrics for five minutes
+  - name: healthy steady operation stays quiet
+    interval: 1m
+    input_series:
+      - series: 'skald_scans_total{job="skald"}'
+        values: '0+1x75'
+      - series: 'process_cpu_time_seconds_total{job="skald"}'
+        values: '0+1x75'
+      - series: 'process_memory_usage_bytes{job="skald"}'
+        values: '30000000+0x75'
+      - series: 'skald_data_allocated_bytes{job="skald"}'
+        values: '1000000+0x75'
+      - series: 'skald_capture_pending{job="skald"}'
+        values: '0+0x75'
+      - series: 'skald_sources_blocked{job="skald"}'
+        values: '0+0x75'
+      - series: 'skald_sources_unavailable{job="skald"}'
+        values: '0+0x75'
+      - series: 'skald_filesystem_free_bytes{job="skald"}'
+        values: '5000000000+0x75'
+      - series: 'skald_database_allocated_bytes{job="skald"}'
+        values: '100+0x75'
+      - series: 'skald_max_database_bytes{job="skald"}'
+        values: '1000+0x75'
+    alert_rule_test:
+      - eval_time: 70m
+        alertname: SkaldCPUHigh
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldMemoryHigh
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldDataGrowingFast
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldCaptureBacklog
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldCaptureBlocked
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldSourceUnavailable
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldFilesystemLow
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldDatabaseNearLimit
+        exp_alerts: []
+      - eval_time: 70m
+        alertname: SkaldMetricsMissing
+        exp_alerts: []

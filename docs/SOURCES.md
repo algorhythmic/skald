@@ -66,10 +66,16 @@ presented as native conversation activity or used to order transcript records.
 The daemon inventories configured roots at startup and approximately every ten
 seconds. During large backfills, discovery waits for the current capture pass.
 Each root has a cap of `max_sessions` enrolled files (default 64). The combined
-capacity of explicit file registrations and discovery roots must not exceed 256.
+capacity of explicit file registrations and discovery roots must not exceed 4,096.
+Each root may select a capacity from 1 to 4,096; the default stays 64. This
+enrollment bound is separate from the 256 source rows returned in status.
 When capacity is reached, existing files continue tailing and diagnostics show
 `capacity_reached`; increase the configured cap and restart within that total.
-No previously enrolled history is silently evicted to make space.
+Missing native files continue to consume enrollment slots so their identities and
+archive history survive source loss. Increase a saturated root’s `max_sessions`
+with `connect --max-sessions` and restart; existing configurations keep their saved
+limits until explicitly changed. No previously enrolled history is silently evicted
+to make space.
 
 Each inventory visits at most 100,000 entries. A limit or traversal failure is
 visible, and no partial walk is claimed as complete. Up to 64 new-file identity
@@ -107,6 +113,29 @@ conflicting identity remains a visible capture failure. Disabling the option
 stops child polling while retaining its archived history under the same namespace.
 This allows capacity to be reduced to the remaining primary registrations.
 
+### Codex CLI and forked rollouts
+
+Codex CLI sessions launched by an orchestrator use the same configured rollout
+root as other sessions using that Codex profile. They consume that root's saved
+capacity; launching them from Claude does not place them in the Claude namespace.
+Profiles using a separate `CODEX_HOME` need their own explicitly connected root.
+
+A fork's first `session_meta` identifies the child. An explicit `forked_from_id`
+can authorize later copied ancestor metadata along an ordered ancestry chain;
+unrelated or contradictory session IDs still block capture. Identity discovery
+and capture use the same bounded rules: at most 16 ancestor edges established
+within the first 256 complete records / 4 MiB. A directly named terminal parent
+can appear later, but new ancestry edges outside the prefix are unsupported.
+Neither paths nor project names establish a fork relationship.
+
+Fork records use `codex-fork-jsonl-v1.0.0` and remain scoped to the child's
+conversation. Copied ancestor metadata does not replace the child's project or
+provider version. A `native_fork_of` relation records verified conversation
+ancestry; inherited messages do not claim per-message parent attribution or
+accepted task delegation. Original source bytes and existing stream identities
+are preserved. This supports the inspected native fork shape, not every Codex
+subagent or alias format.
+
 Namespaces are generated from provider, stable host identity and canonical root,
 then saved. Use `--namespace ID` to share an existing namespace deliberately.
 Namespaces represent local profiles; they do not prove a provider account login.
@@ -137,7 +166,10 @@ Use `skald status` or `d` in the TUI for root discovery status, counts, sampled
 per-file rejection reasons, and captured-file health. Root discovery and file
 capture are separate: an available directory does not prove all conversations
 were captured. `probe_limit`, `partial`, `capacity_reached` and `unavailable` remain
-visible. Rejection counts can exceed the bounded 16-item diagnostic sample.
+visible. When a root has proven candidates beyond capacity, `capacity_reached`
+takes precedence over the per-pass probe limit and sampled rejection state;
+relocation probes still rotate within the 64-probe bound. Rejection counts can
+exceed the bounded 16-item diagnostic sample.
 
 Each captured-file status row identifies its enrolled stream without returning a
 source path or conversation body. `enrolled` remains true when the file disappears;
@@ -188,6 +220,28 @@ idempotency checks, discovery/relocation/scope/capacity tests, preserved-mtime r
 checks, and compiled acceptance through a real Unix socket (`make discovery-smoke`).
 All committed test data is synthetic.
 
+### Fixture capability matrix
+
+`sessioncapture/current_versions_test.go` exercises fresh synthetic fixtures
+based on an October 22 metadata-only inventory of installed transcript shapes.
+The inventory inspected event types, roles, content-block types, persisted recap
+shape and provider versions; it did not retain or print conversation bodies.
+Tests verify ordinary text, raw preservation and checkpoint serialization/restart.
+
+| Provider version | Ordinary content | Native recap | Continuation/restart | Native relationship |
+| --- | --- | --- | --- | --- |
+| Claude Code 2.1.263 | Fixture verified | Persisted `system/away_summary` string | Fixture verified | Unsupported |
+| Claude Code 2.1.296, 2.1.303 | Fixture verified: string/text blocks; tool blocks preserved | Persisted `system/away_summary` string | Fixture verified | Native sidechain child identity; opt-in capture |
+| Codex 0.153.4 | Fixture verified: response items | Unsupported: native TUI recap not persisted | Fixture verified | Parent metadata extension |
+| Codex 0.163.0 | Fixture verified: `response_item` input/output text | Unsupported: native TUI recap not persisted | Fixture verified | Bounded native `forked_from_id` lineage |
+
+Claude thinking blocks retain opaque native data; these tests do not claim
+semantic reasoning extraction. Codex multimodal interpretation is not covered by
+this text capability claim. Unknown versions retain unknown ordinary/recap
+capabilities. Generic conversation aliases, provider hooks and surface activation
+remain unsupported. These are bounded schema compatibility claims, not full
+provider certification or native UI recap generation.
+
 Health regression checks cover unknown checkpoints, missing and nonmonotonic
 native timestamps, idle replays, source loss/reappearance, daemon initialization,
 archive restart/restore, scoped counts and omission, and status scope denial.
@@ -198,7 +252,7 @@ returned ordinary messages from both and a Claude recap without blocked records
 or gaps in those samples. This is sample evidence, not a claim of complete
 provider coverage. Personal conversation bodies are not saved as test fixtures.
 
-Other provider subagents, general fork/alias coverage, encrypted/ephemeral recap extraction, browser/cloud
+General subagent/alias coverage, encrypted/ephemeral recap extraction, browser/cloud
 sources, fresh activity selection, archive-wide descriptions, retention and
 broader scale/recovery gates remain separate work. No integration here requires
 Heimdall, Braid, Herdr, a provider hook, or a summarization request.

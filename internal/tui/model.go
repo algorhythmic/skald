@@ -75,6 +75,7 @@ type line struct {
 	dot   string
 }
 type model struct {
+	descriptionSelection                                            *archive.DescriptionSelection
 	palette                                                         palette
 	reflow                                                          bool
 	diagnostics                                                     bool
@@ -398,6 +399,7 @@ func (m *model) clearPrivate() {
 	m.snapshot = Snapshot{}
 	m.rows = nil
 	m.page = archive.Page[archive.TranscriptEntry]{}
+	m.descriptionSelection = nil
 	m.detailKey = ""
 	m.lines = nil
 	m.transcript = false
@@ -456,6 +458,7 @@ func (m *model) findNext(direction int) {
 }
 func (m *model) resetDetail() {
 	m.page = archive.Page[archive.TranscriptEntry]{}
+	m.descriptionSelection = nil
 	m.transcriptCursors = []string{""}
 	m.transcriptPage = 0
 	m.transcriptTarget = 0

@@ -82,7 +82,7 @@ with tempfile.TemporaryDirectory(prefix="skald-native-") as work:
         capabilities = cli("capabilities", "--socket", socket)
         assert capabilities["contracts"]["archive_feed"] == 1
         assert capabilities["contracts"]["redaction_receipt"] == 1
-        assert capabilities["archive_schema"] == 6
+        assert capabilities["archive_schema"] == 8
         assert capabilities["namespaces"] == ["fixture:claude", "fixture:codex"]
         first_feed = cli("changes", "--socket", socket, "--limit", 3)
         assert first_feed["version"] == 1 and first_feed["phase"] == "snapshot"

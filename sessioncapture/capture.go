@@ -100,6 +100,18 @@ func (s Source) validate() error {
 // records and gaps. Prefix verification is deliberately conservative in L0: it
 // re-hashes captured bytes with bounded memory before accepting continuation.
 func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits, now time.Time) (Batch, error) {
+	return read(input, source, previous, limits, now, false)
+}
+
+// ReadSnapshot reads an owned, immutable in-memory snapshot. The caller must not
+// modify data until this call returns. Continuity is still verified against the
+// full captured prefix; only the redundant concurrent-mutation readback is
+// omitted. Use Read for native files and other mutable readers.
+func ReadSnapshot(data []byte, source Source, previous Checkpoint, limits Limits, now time.Time) (Batch, error) {
+	return read(bytes.NewReader(data), source, previous, limits, now, true)
+}
+
+func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits, now time.Time, immutable bool) (Batch, error) {
 	out := Batch{Records: []Captured{}, Gaps: []Gap{}}
 	if err := source.validate(); err != nil {
 		return out, err
@@ -121,6 +133,14 @@ func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 			if err != nil {
 				return out, err
 			}
+		}
+	}
+	var codexContext codexForkContext
+	if source.Provider == Codex {
+		var err error
+		codexContext, err = probeCodexFork(input)
+		if err != nil {
+			return out, err
 		}
 	}
 	cp := previous
@@ -182,7 +202,7 @@ func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		if cp.Generation == "" {
 			cp.Generation = sessionrecord.Key("generation", cp.SourceKey, strconv.FormatInt(cp.Epoch, 10), sessionrecord.Digest(line))
 		}
-		r, code, err := normalize(line, source, &cp, now, childContext)
+		r, code, err := normalize(line, source, &cp, now, childContext, codexContext)
 		if err != nil {
 			out.Gaps = append(out.Gaps, Gap{Code: err.Error(), Offset: cp.Offset, Ordinal: cp.Ordinal, Generation: cp.Generation})
 			out.Blocked = true
@@ -212,17 +232,19 @@ func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		}
 	}
 	cp.PrefixDigest = "sha256:" + hex.EncodeToString(h.Sum(nil))
-	// A native file may be replaced or rewritten while parsing. Reject the whole
-	// candidate batch unless its exact captured prefix still matches at readback.
-	if _, err := input.Seek(0, io.SeekStart); err != nil {
-		return out, err
-	}
-	verify := sha256.New()
-	if n, err := io.CopyN(verify, input, cp.Offset); err != nil || n != cp.Offset {
-		return Batch{}, errors.New("source_changed_during_read")
-	}
-	if "sha256:"+hex.EncodeToString(verify.Sum(nil)) != cp.PrefixDigest {
-		return Batch{}, errors.New("source_changed_during_read")
+	if !immutable {
+		// A native file may be replaced or rewritten while parsing. Reject the whole
+		// candidate batch unless its exact captured prefix still matches at readback.
+		if _, err := input.Seek(0, io.SeekStart); err != nil {
+			return out, err
+		}
+		verify := sha256.New()
+		if n, err := io.CopyN(verify, input, cp.Offset); err != nil || n != cp.Offset {
+			return Batch{}, errors.New("source_changed_during_read")
+		}
+		if "sha256:"+hex.EncodeToString(verify.Sum(nil)) != cp.PrefixDigest {
+			return Batch{}, errors.New("source_changed_during_read")
+		}
 	}
 	out.Checkpoint = cp
 	return out, nil

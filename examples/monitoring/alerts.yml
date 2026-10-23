@@ -1,0 +1,66 @@
+groups:
+  - name: skald.local
+    rules:
+      - alert: SkaldCPUHigh
+        expr: rate(process_cpu_time_seconds_total{job="skald"}[5m]) > 0.25
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald has used more than a quarter of a CPU core for five minutes
+      - alert: SkaldMemoryHigh
+        expr: process_memory_usage_bytes{job="skald"} > 536870912
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald resident memory exceeds 512 MiB
+      - alert: SkaldDataGrowingFast
+        expr: delta(skald_data_allocated_bytes{job="skald"}[1h]) > 536870912
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald data allocation grew by more than 512 MiB per hour
+      - alert: SkaldCaptureBacklog
+        expr: skald_capture_pending{job="skald"} > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald capture work has remained pending for ten minutes
+      - alert: SkaldCaptureBlocked
+        expr: skald_sources_blocked{job="skald"} > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald has a blocked capture source
+      - alert: SkaldSourceUnavailable
+        expr: skald_sources_unavailable{job="skald"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald has an unavailable source
+      - alert: SkaldFilesystemLow
+        expr: skald_filesystem_free_bytes{job="skald"} < 536870912
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald filesystem has less than 512 MiB available
+      - alert: SkaldDatabaseNearLimit
+        expr: skald_database_allocated_bytes{job="skald"} / skald_max_database_bytes{job="skald"} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Skald database allocation exceeds 90 percent of its capture limit
+      - alert: SkaldMetricsMissing
+        expr: absent_over_time(skald_scans_total{job="skald"}[5m])
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Prometheus has received no Skald metrics for five minutes

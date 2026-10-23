@@ -118,6 +118,8 @@ func next(c Cursor, after string) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(encode(c)))
 }
 
+const sessionVersionCountSQL = "SELECT count(*) FROM artifact_versions v JOIN artifacts a USING(record_key) WHERE a.conversation_key=s.conversation_key"
+
 func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit int) (Page[Session], error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -130,7 +132,7 @@ func (s *Store) Sessions(ctx context.Context, ns []string, cursor string, limit 
 	args = append(args, c.After, limit+1)
 	rows, err := s.db.QueryContext(ctx, `SELECT s.conversation_key,s.namespace,src.provider,s.native_id,
  coalesce(title.title,s.native_id),coalesce(title.record_key,''),coalesce(title.source_revision,''),coalesce(title.origin,''),coalesce(title.ordering_ambiguous,0),
- (SELECT count(*) FROM artifact_versions v JOIN artifacts a USING(record_key) WHERE a.conversation_key=s.conversation_key),
+ (`+sessionVersionCountSQL+`),
  CASE WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='available') THEN 'available'
  WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='blocked') THEN 'blocked'
  WHEN EXISTS(SELECT 1 FROM stream_locators l JOIN streams st USING(stream_key) WHERE st.namespace=s.namespace AND l.conversation_id=s.native_id AND l.active=1 AND l.health='capture_gaps') THEN 'capture_gaps'
@@ -358,7 +360,7 @@ func (s *Store) health(ctx context.Context, ns []string) ([]SourceHealth, error)
  coalesce(cp.captured_offset,0),coalesce(cp.parsed_offset,0),coalesce(cp.has_gaps,0),
  (SELECT o.observed_at FROM record_observations o
   WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 LIMIT 1),
- (SELECT n.source_time FROM record_observations o JOIN normalizations n
+ (SELECT n.source_time FROM record_observations o JOIN normalization_storage n
   ON n.record_key=o.record_key AND n.source_revision=o.source_revision
   WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 ORDER BY n.rowid DESC LIMIT 1)
  FROM stream_locators l JOIN streams st USING(stream_key) JOIN sources src USING(namespace)

@@ -203,7 +203,7 @@ func TestBackupTamperingIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("DROP TRIGGER immutable_content; UPDATE content_objects SET original_bytes=zeroblob(byte_length)"); err != nil {
+	if _, err := db.Exec("UPDATE content_storage SET original_bytes=zeroblob(byte_length)"); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()

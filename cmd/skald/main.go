@@ -16,6 +16,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/buildinfo"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
@@ -33,6 +34,12 @@ Source connection:
 Archive commands:
   skald tui [--socket PATH] [--namespace ID] [--theme heimdall|desktop|amber]
   skald serve [--config FILE] [--data-dir DIRECTORY] [--socket PATH]
+  skald metrics [--socket PATH]
+  skald context --text TEXT [--namespace ID] [--max-bytes 16384] [--socket PATH]
+  skald descriptions --conversation KEY [--namespace ID] [--socket PATH]
+  skald compress [--max-rows 100] [--max-input-bytes 4194304] [--socket PATH]
+  skald archive-compact --data-dir DIRECTORY [--apply]
+  skald profile --kind cpu|heap --output NEW_FILE [--seconds 10] [--socket PATH]
   skald status [--socket PATH] [--namespace ID]
   skald capabilities [--socket PATH] [--namespace ID]
   skald changes [--socket PATH] [--namespace ID] [--limit 25] [--cursor CURSOR]
@@ -40,7 +47,12 @@ Archive commands:
   skald artifacts --conversation KEY [--socket PATH] [--namespace ID] [--limit 25] [--cursor CURSOR]
   skald get --record KEY --revision DIGEST --adapter VERSION [--socket PATH] [--namespace ID] [--raw]
   skald backup [--socket PATH]
+  skald backup-compress --backup FILE [--destination FILE.zst] [--max-backup-bytes N]
   skald restore --backup FILE --data-dir NEW_DIRECTORY
+  skald storage-usage ABSOLUTE_ROOT [ABSOLUTE_ROOT ...]
+  skald recovery-retain --recovery-dir DIRECTORY [--keep-raw 1] [--max-age DURATION] [--max-bytes N] [--apply]
+  skald recovery-check --backup FILE
+  skald recovery-job --destination-dir DIRECTORY [--socket PATH] [--apply]
   skald redact --namespace ID --scope source|conversation|record --target KEY [--socket PATH]
   skald mcp --socket PATH --namespace ID [--namespace ID ...] [--allow-raw]
 
@@ -79,7 +91,7 @@ func run(args []string, out, stderr io.Writer) error {
 		if len(args) != 1 {
 			return errors.New("unexpected_arguments")
 		}
-		_, err := fmt.Fprintf(out, "skald 0.1.0-dev · sessionrecord v1 · archive schema %d\n", archive.SchemaVersion)
+		_, err := fmt.Fprintf(out, "skald %s · sessionrecord v1 · archive schema %d\n", buildinfo.Version, archive.SchemaVersion)
 		return err
 	}
 	if args[0] == "sources" || args[0] == "connect" {
@@ -90,6 +102,18 @@ func run(args []string, out, stderr io.Writer) error {
 	}
 	if args[0] == "mcp" {
 		return runMCP(args[1:], os.Stdin, out, stderr)
+	}
+	if args[0] == "metrics" || args[0] == "profile" {
+		return runDiagnostics(args, out, stderr)
+	}
+	if isMaintenanceCommand(args[0]) {
+		return runMaintenance(args, out, stderr)
+	}
+	if args[0] == "context" || args[0] == "descriptions" || args[0] == "compress" {
+		return runContext(args, out, stderr)
+	}
+	if args[0] == "archive-compact" {
+		return runArchiveCompact(args[1:], out, stderr)
 	}
 	if isArchiveCommand(args[0]) {
 		return runArchive(args, out, stderr)

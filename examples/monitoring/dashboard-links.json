@@ -1,0 +1,81 @@
+{
+  "base_url": "http://192.168.86.21:9090",
+  "alerts_url": "http://192.168.86.21:9090/alerts",
+  "graphs": [
+    {
+      "title": "CPU percent of one core",
+      "promql": "100 * rate(process_cpu_time_seconds_total{job=\"skald\"}[5m])",
+      "url": "http://192.168.86.21:9090/query?g0.expr=100+%2A+rate%28process_cpu_time_seconds_total%7Bjob%3D%22skald%22%7D%5B5m%5D%29&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Resident memory bytes",
+      "promql": "process_memory_usage_bytes{job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=process_memory_usage_bytes%7Bjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Data allocation bytes",
+      "promql": "skald_data_allocated_bytes{job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=skald_data_allocated_bytes%7Bjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Database allocation bytes",
+      "promql": "skald_database_allocated_bytes{job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=skald_database_allocated_bytes%7Bjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "WAL allocation bytes",
+      "promql": "skald_wal_allocated_bytes{job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=skald_wal_allocated_bytes%7Bjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Recovery allocation bytes",
+      "promql": "skald_recovery_allocated_bytes{job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=skald_recovery_allocated_bytes%7Bjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Pending capture sources",
+      "promql": "skald_capture_pending{job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=skald_capture_pending%7Bjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Pending capture bytes",
+      "promql": "skald_capture_pending_bytes{job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=skald_capture_pending_bytes%7Bjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Source availability",
+      "promql": "{__name__=~\"skald_sources_(available|unavailable|blocked|capture_gaps)\",job=\"skald\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=%7B__name__%3D~%22skald_sources_%28available%7Cunavailable%7Cblocked%7Ccapture_gaps%29%22%2Cjob%3D%22skald%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Archive growth bytes per hour",
+      "promql": "delta(skald_data_allocated_bytes{job=\"skald\"}[1h])",
+      "url": "http://192.168.86.21:9090/query?g0.expr=delta%28skald_data_allocated_bytes%7Bjob%3D%22skald%22%7D%5B1h%5D%29&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Idle scan CPU work",
+      "promql": "rate(skald_scans_total{job=\"skald\"}[5m])",
+      "url": "http://192.168.86.21:9090/query?g0.expr=rate%28skald_scans_total%7Bjob%3D%22skald%22%7D%5B5m%5D%29&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Capture records per second",
+      "promql": "rate(skald_captured_records_total{job=\"skald\"}[5m])",
+      "url": "http://192.168.86.21:9090/query?g0.expr=rate%28skald_captured_records_total%7Bjob%3D%22skald%22%7D%5B5m%5D%29&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Scan p95 seconds",
+      "promql": "histogram_quantile(0.95,sum by(le)(rate(skald_scan_duration_seconds_bucket{job=\"skald\"}[5m])))",
+      "url": "http://192.168.86.21:9090/query?g0.expr=histogram_quantile%280.95%2Csum+by%28le%29%28rate%28skald_scan_duration_seconds_bucket%7Bjob%3D%22skald%22%7D%5B5m%5D%29%29%29&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Prometheus resident memory bytes",
+      "promql": "process_resident_memory_bytes{job=\"prometheus\"}",
+      "url": "http://192.168.86.21:9090/query?g0.expr=process_resident_memory_bytes%7Bjob%3D%22prometheus%22%7D&g0.tab=0&g0.range_input=1h"
+    },
+    {
+      "title": "Prometheus CPU percent of one core",
+      "promql": "100 * rate(process_cpu_seconds_total{job=\"prometheus\"}[5m])",
+      "url": "http://192.168.86.21:9090/query?g0.expr=100+%2A+rate%28process_cpu_seconds_total%7Bjob%3D%22prometheus%22%7D%5B5m%5D%29&g0.tab=0&g0.range_input=1h"
+    }
+  ]
+}

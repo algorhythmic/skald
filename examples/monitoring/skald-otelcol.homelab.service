@@ -1,0 +1,23 @@
+# DRAFT system service for 192.168.86.21. This file is never auto-installed.
+# Install the collector binary and config at these paths before enabling it.
+[Unit]
+Description=Skald OTLP metrics receiver for homelab Prometheus
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/otelcol-contrib --config=/etc/otelcol-contrib/skald.yml
+Restart=on-failure
+RestartSec=5
+DynamicUser=true
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryHigh=256M
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

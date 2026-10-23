@@ -169,6 +169,7 @@ func IdentifyWithOptions(ctx context.Context, root, path, provider string, optio
 	childShape := false
 	var claudeMode string
 	var controlParent, controlAgent string
+	var codexContext codexForkContext
 	probeBytes := int64(0)
 	probeRecords := 0
 	for n := 0; n < 256; n++ {
@@ -241,13 +242,25 @@ func IdentifyWithOptions(ctx context.Context, root, path, provider string, optio
 			childShape = childShape || (nativeID.child && (((kind == "user" || kind == "assistant") && obj(native, "message") != nil) || kind == "attachment"))
 		} else if str(native, "type") == "session_meta" {
 			p := obj(native, "payload")
-			id = str(p, "id")
-			out.Project = str(p, "cwd")
-			out.Originator = str(p, "originator")
-			if v := str(p, "cli_version"); v != "" {
-				out.ProviderVersion = v
+			metadata, err := codexSessionMetadata(native)
+			if err != nil {
+				return out, err
 			}
-			shape = id != ""
+			if err := codexContext.observe(metadata); err != nil {
+				return out, err
+			}
+			id = codexContext.root
+			// Copied ancestor headers prove lineage, not the child's project,
+			// originator, version, or immediate parent.
+			if metadata.id != "" && metadata.id == codexContext.root {
+				out.Project = str(p, "cwd")
+				out.Originator = str(p, "originator")
+				out.ParentConversationID = metadata.parent
+				if v := str(p, "cli_version"); v != "" {
+					out.ProviderVersion = v
+				}
+			}
+			shape = shape || id != ""
 		}
 		if id != "" {
 			if out.ConversationID != "" && out.ConversationID != id {

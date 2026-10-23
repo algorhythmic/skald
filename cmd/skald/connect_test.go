@@ -52,7 +52,7 @@ func TestConnectPreviewPersistsScopeAndDoesNotCollect(t *testing.T) {
 		t.Fatal("repeat connection changed saved scope", saved, err)
 	}
 	original, _ := os.ReadFile(config)
-	if err := run(append(args, "--max-sessions", "257"), &out, &stderr); err == nil {
+	if err := run(append(args, "--max-sessions", "4097"), &out, &stderr); err == nil {
 		t.Fatal("invalid capacity accepted")
 	}
 	final, _ := os.ReadFile(config)
@@ -125,5 +125,35 @@ func TestConnectSubagentOptInPersistsAndCanBeRevoked(t *testing.T) {
 		return nil
 	}); err == nil {
 		t.Fatal("unsupported config accepted")
+	}
+}
+
+func TestConnectRaisesSavedCapacityWithinCombinedBound(t *testing.T) {
+	root, other := t.TempDir(), t.TempDir()
+	config := filepath.Join(t.TempDir(), "sources.json")
+	var out, stderr bytes.Buffer
+	args := []string{"connect", "--provider", "codex", "--root", root, "--config", config, "--namespace", "fixture:large", "--since", "all"}
+	for _, capacity := range []string{"128", "768"} {
+		if err := run(append(args, "--max-sessions", capacity), &out, &stderr); err != nil {
+			t.Fatal("capacity increase failed", capacity, err)
+		}
+	}
+	if err := run(args, &out, &stderr); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := daemon.LoadConfig(config)
+	if err != nil || len(cfg.Discovery) != 1 || cfg.Discovery[0].MaxSessions != 768 || cfg.Discovery[0].Namespace != "fixture:large" || !cfg.Discovery[0].ModifiedSince.IsZero() {
+		t.Fatal("repeat connect changed enlarged root identity or scope", cfg, err)
+	}
+	before, err := os.ReadFile(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"connect", "--provider", "claude_code", "--root", other, "--config", config, "--namespace", "fixture:other", "--max-sessions", "3500"}, &out, &stderr); err == nil || err.Error() != "configured_source_capacity_exceeded" {
+		t.Fatal("combined capacity not enforced", err)
+	}
+	after, err := os.ReadFile(config)
+	if err != nil || !bytes.Equal(before, after) {
+		t.Fatal("failed capacity increase changed saved config", err)
 	}
 }

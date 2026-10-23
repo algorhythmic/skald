@@ -2,13 +2,14 @@
 # Builds the working tree directly, so uncommitted changes are included and no
 # tag or network fetch is needed. Go comes from .tools/go or PATH.
 pkgname=skald
-pkgver=0.1.0
+pkgver=0.2.0rc1
 pkgrel=1
 pkgdesc="Conversation context across projects, terminals and environments"
 arch=('x86_64' 'aarch64')
 url="https://github.com/algorhythmic/skald"
 license=('custom')
 options=('!debug')
+optdepends=('zstd: compressed backup creation and restore')
 source=()
 
 build() {

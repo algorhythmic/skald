@@ -206,6 +206,11 @@ func (m *model) overview() {
 	}
 }
 func (m *model) description(row int) {
+	if m.descriptionSelection != nil {
+		m.archiveDescription(row, *m.descriptionSelection)
+		return
+	}
+
 	m.add(fmt.Sprintf("│    recent window · %d records · N/P page history in transcript", len(m.page.Items)), "dim", row, -1, "")
 	recap, assistant := -1, -1
 	streams := map[string]bool{}
@@ -641,7 +646,7 @@ func (m *model) overlay(screen tcell.Screen, title string, lines []string) {
 }
 func (m *model) drawHelp(screen tcell.Screen) {
 	m.overlay(screen, "skald / keyboard", []string{
-		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source, recency, status or all     O  order by recent, title or status     /  filter", "x  hide/show idle sessions     h  open transcript at the latest recap     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  cycle heimdall/desktop/amber themes", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the recent 25-record window. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
+		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source, recency, status or all     O  order by recent, title or status     /  filter", "x  hide/show idle sessions     h  open transcript at the latest recap     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  cycle heimdall/desktop/amber themes", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the whole archive. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
 }
 func (m *model) drawReference(screen tcell.Screen) {
 	e := m.selectedEntry()
@@ -729,4 +734,42 @@ func diagnosticTime(value *string, now time.Time) string {
 		elapsed = fmt.Sprintf("%dd", int(age.Hours()/24))
 	}
 	return *value + " (" + elapsed + " ago)"
+}
+
+func (m *model) archiveDescription(row int, d archive.DescriptionSelection) {
+	m.add("│    archive-wide description · exact archived evidence", "dim", row, -1, "")
+	if d.OrderingAmbiguous {
+		m.add("│    ordering ambiguous across streams or generations · no global latest claim", "warn", row, -1, "")
+	}
+	if d.Selected == nil {
+		m.add("│    description unavailable · native title shown above", "dim", row, -1, "")
+		return
+	}
+	label := map[string]string{"native_recap": "native recap", "assistant_excerpt": "assistant excerpt", "native_title": "native title fallback"}[d.Kind]
+	if label == "" {
+		label = "archived excerpt"
+	}
+	e := d.Selected
+	m.add("│    "+label+" · "+sourceTime(*e)+" · coverage "+e.Coverage, "amber", row, -1, "")
+	m.paragraph(e.Text, "│    ", "", row, -1, 5)
+	if e.Truncated {
+		m.add("│    display clipped · exact archived reference preserved", "dim", row, -1, "")
+	}
+	m.add("│    ref "+e.Key+" · "+e.Revision+" · "+e.Adapter, "dim", row, -1, "")
+	for _, r := range d.PriorRecaps {
+		label := "prior native recap"
+		if d.OrderingAmbiguous {
+			label = "retained native recap · order ambiguous"
+		}
+		m.add("│    "+label+" · coverage "+r.Coverage, "dim", row, -1, "")
+		m.paragraph(r.Text, "│    ", "dim", row, -1, 3)
+		m.add("│    ref "+r.Key+" · "+r.Revision+" · "+r.Adapter, "dim", row, -1, "")
+	}
+	if d.NewActivity && !d.OrderingAmbiguous {
+		m.add("│    newer activity follows the recap in proven stream order", "warn", row, -1, "")
+	}
+	if d.RecapsTruncated {
+		m.add("│    more native recaps available in transcript", "dim", row, -1, "")
+	}
+	m.add("│", "dim", row, -1, "")
 }

@@ -170,7 +170,7 @@ def run():
             names = {tool["name"] for tool in listed}
             assert names == {
                 "capabilities", "status", "sessions.list", "artifacts.list",
-                "artifacts.get", "changes.read", "transcript.read",
+                "artifacts.get", "changes.read", "transcript.read", "context.query", "descriptions.read",
             }, names
             assert all(tool["inputSchema"]["additionalProperties"] is False for tool in listed)
 

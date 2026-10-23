@@ -1,0 +1,9 @@
+[Unit]
+Description=Export and validate a Skald recovery backup
+
+[Service]
+Type=oneshot
+UMask=0077
+# Create this private directory on an independent disk or mounted remote volume.
+# Set the executable path, socket and destination before enabling this example.
+ExecStart=/usr/bin/skald recovery-job --socket %t/skald/skald.sock --destination-dir /REPLACE-WITH-OFF-DEVICE-MOUNT/skald --off-device --apply

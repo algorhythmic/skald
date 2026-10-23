@@ -104,6 +104,26 @@ must match the proven child's available native identity fields; they cannot
 establish child identity on their own. Agent-only context references require
 bounded verification against native child evidence in the stream.
 
+### Codex fork history
+
+The first native `session_meta.payload.id` fixes the rollout's conversation.
+When it exposes `forked_from_id`, copied ancestor headers may carry only the
+ordered, explicitly named parent IDs. When present, native thread-spawn parent
+evidence must agree with a fork edge. Conflicting IDs without that evidence,
+cycles and contradictory edges remain capture failures.
+
+The fork adapter `codex-fork-jsonl-v1.0.0` keeps inherited occurrences in the
+child's conversation. It emits `native_fork_of` targeting the immediate parent's
+conversation key, with native or bounded-prefix evidence as appropriate. This
+relation does not prove the parent is archived or identify individual inherited
+messages as parent-owned. Copied metadata retains its original native ID and
+inherited fields without assigning the ancestor's project to the child. The
+ordinary Codex adapter output remains unchanged.
+
+Identity replay is bounded to 256 complete records / 4 MiB and 16 ancestor edges;
+it does not add checkpoint or delivery fields. See [source coverage](SOURCES.md#codex-cli-and-forked-rollouts)
+for the supported prefix and late-parent behavior.
+
 ## Checkpoint boundary
 
 `Read(io.ReadSeeker, Source, Checkpoint, Limits, now)` returns records, original

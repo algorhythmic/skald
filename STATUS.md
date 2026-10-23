@@ -1,12 +1,105 @@
 # Skald implementation status
 
-Updated 2026-10-21. **The Skald-owned OHS producer implementation batches are complete and verified locally.**
+Updated 2026-10-22. **The Skald-owned OHS producer implementation batches are complete and verified locally.**
 Skald can now enroll primary conversations and optional Claude children in selected roots and
 Devin desktop session stores (`acp-messages` SQLite),
 retain independent history, serve bounded reads, and back up/restore its archive.
 The TUI browses project groups, bounded excerpts, native recaps and transcript
-history through the socket API. Seven scoped MCP tools expose bounded reads to
-agents. Ranked retrieval and peer integrations remain future work. The full release gates below remain open.
+history through the socket API. Nine scoped MCP tools expose bounded reads to
+agents. Optional pinned Braid lexical retrieval is implemented. Peer runtime
+integration and the full release gates below remain open.
+
+## Resource and storage completion batch — 2026-10-22
+
+Sol implementation agents and an independent Sol review completed schema-8
+lossless payload compression, offline compaction, bounded recovery operations,
+whole-archive descriptions, pinned Braid context retrieval, current provider
+shape checks and operational metrics. Native ingestion remains independent of MCP.
+
+The tested `0.2.0-rc.1` build is installed locally. Conversion reduced stored
+payloads from 2.37 GB to 1.17 GB; exclusive compaction reclaimed 1.41 GB, reducing
+the database from 3.78 GB to 2.37 GB. Capture resumed with the same archive
+identity, all history retained and zero queued deliveries. Ongoing capture grows
+the file again; compression and compaction are explicit maintenance operations.
+
+Separate 70-second active-workload samples measured 25.4% versus 22.8% of one core
+and 68.1 versus 60.2 MiB daemon RSS. Storage writes were 0.99 versus 1.15 MB/s;
+this is not a matched-workload throughput improvement. Retained recovery copies
+still allocate 6.69 GB, and the measured data directory totals 9.14 GB. Retrieval
+index allocation and its child process are additional on-demand costs.
+
+No monitoring service was installed. The collector/service/rule drafts target
+`192.168.86.21`, forwarding to its existing Prometheus remote-write receiver.
+The live endpoint remains unset; `service.instance.id` uses the nonsecret alias
+`workstation-01`. Future endpoint and installation notes are in
+[the monitoring drafts](examples/monitoring/README.md).
+
+No backup destination is configured. Status reports **no off-device backup
+configured**, unknown ages for the last off-device backup and last verified
+restore, and `l1_complete: false`. Same-disk copies do not count as independent.
+Recovery templates are not installed schedules and no retention deletion ran.
+
+Whole-repository tests/vet, full race tests, native/TUI/discovery/MCP/diagnostics/
+completion smoke checks, independent producer fixture checks and offline
+collector/rule validation pass. The producer prerelease and Odin fixture pin are
+prepared separately; neither establishes Odin runtime acceptance. See the
+[integration receipt](docs/COMPLETION-IMPLEMENTATION-2026-10-22.md) for measured
+limits and final publication disposition.
+
+## Background load, metrics and recovery compression — 2026-10-22
+
+The next Sol implementation batch adds per-scan bulk checkpoint reads, grouped
+due health heartbeats, suppression of redundant empty deliveries, private
+aggregate metrics and bounded CPU/heap profiling. The official OpenTelemetry
+metrics SDK supports explicit opt-in OTLP/HTTP export; live export remains off
+until a collector endpoint is configured. Native ingestion does not require MCP.
+
+Matched 615-stream idle CPU fell from 11.36% to 2.21% of one core and reported
+storage writes from 2.92 MB/s to 8.8 KB/s. Live write throughput fell from 2.17 to
+0.61 MB/s in separate 70-second active-workload samples; live CPU remains
+substantial at 29.3% of one core. Profiles identify prefix hashing and Devin dump
+construction as the next measured optimization targets. Exact resource numbers,
+workload limits, deployment and checks are in the
+[background resource receipt](docs/BACKGROUND-RESOURCE-RECEIPT-2026-10-22.md).
+
+Closed recovery backups can now be compressed to verified zstd/manifest pairs
+and restored through the normal command. The tool retains originals and does
+not enable automatic retention. See [archive setup](docs/ARCHIVE-SETUP.md).
+
+## Codex session coverage and scoped-count performance — 2026-10-22
+
+Three Sol implementation agents completed bounded enrollment scaling, native
+Codex fork parsing and archive count optimization, followed by an independent
+Sol review and integration checks.
+
+- Capture supports up to 4,096 selected streams; detailed status remains bounded
+  to 256 rows with omission counts. Missing sources retain archived identities,
+  and capacity diagnostics survive later probe exhaustion or rejections.
+- Codex forks use explicit, ordered `forked_from_id` evidence within a bounded
+  prefix. Copied ancestor headers remain in the child's stream and cannot
+  overwrite child project/version metadata. Parent relations survive recovery
+  from checkpoints written by the previous adapter. General aliases and provider
+  subagent compatibility remain outside this support.
+- Schema 7 adds a namespace covering index. Scoped counts use indexed lookups;
+  a count covering every persisted namespace uses SQLite's direct aggregate.
+  Retired namespaces still constrain that fast path. Migration preserves a
+  verified recovery copy and enforces disk headroom and archive capacity before
+  index creation, rolling back budget failures.
+- On 187,373 synthetic record versions, all-namespace counts improved from
+  659.8 ms to 16.6 ms; a one-namespace count improved from 157.7 ms to 80.6 ms.
+  These query benchmarks do not by themselves measure live daemon CPU.
+
+Go tests, schema/manifest checks, vet, compiled native/TUI/discovery/MCP smoke
+checks and full race tests pass. Archive and capture race tests passed again
+after the recovery and migration safeguards. Source/checkpoint/delivery formats
+remain version 1; original source histories are unchanged.
+
+The tested build is deployed locally. All 357 current Codex rollout IDs,
+including 189 Odin rollouts, were represented after backfill, with zero queued
+deliveries. Four oversized-record streams remain visibly partial. The 70-second
+resource sample measured 27.5% of one CPU core and 58.7 MiB daemon RSS; substantial
+background load remains. See the [coverage and deployment receipt](docs/SESSION-COVERAGE-RECEIPT-2026-10-22.md)
+for configuration, recovery artifacts, measurements and the MCP reconnect step.
 
 ## Native Claude children and agent reads — 2026-10-21
 
@@ -193,7 +286,7 @@ synthetic state. `git diff --check` and updated documentation links also pass.
   bookkeeping pages to open-but-idle sessions. A consumed input request reads
   as working; cross-stream signal
   ordering is labeled ambiguous. This is archived evidence, not live presence.
-- SQLite schema 6 with original bytes, immutable source and normalization versions,
+- SQLite schema 7 with original bytes, immutable source and normalization versions,
   separate source-order observations/generation epochs, checkpoint/change commits,
   capture gaps, source health, record heads and project observations. Native titles
   have bounded attributable projections; ambiguous cross-stream ordering is labeled.

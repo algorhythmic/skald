@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"io"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/algorhythmic/skald/internal/archive"
 	"github.com/algorhythmic/skald/internal/daemon"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
@@ -60,7 +62,7 @@ func runConnect(args []string, out, stderr io.Writer) error {
 	namespace := f.String("namespace", "", "stable namespace override (persisted once)")
 	since := f.String("since", "", "include files modified since RFC3339 timestamp or all; new connections default to seven days ago")
 	limit := f.Int("limit", 10, "maximum source metadata previews (1–64)")
-	capacity := f.Int("max-sessions", 64, "maximum enrolled files for this root (total configured capacity ≤256)")
+	capacity := f.Int("max-sessions", 64, fmt.Sprintf("maximum enrolled files for this root (total configured capacity ≤%d)", archive.MaxEnrolledSources))
 	includeSubagents := f.Bool("include-subagents", false, "include native Claude subagent transcripts with verified identity")
 	previous := f.String("previous-root", "", "explicit former root for an intentional relocation; requires --namespace")
 	if err := f.Parse(args[1:]); err != nil {

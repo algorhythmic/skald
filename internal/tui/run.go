@@ -9,13 +9,14 @@ import (
 )
 
 type result struct {
-	index    int
-	id       int
-	kind     string
-	snapshot Snapshot
-	page     archive.Page[archive.TranscriptEntry]
-	key      string
-	err      error
+	description *archive.DescriptionSelection
+	index       int
+	id          int
+	kind        string
+	snapshot    Snapshot
+	page        archive.Page[archive.TranscriptEntry]
+	key         string
+	err         error
 }
 
 func Run(ctx context.Context, backend Backend, theme Theme) error {
@@ -87,8 +88,20 @@ func runScreen(ctx context.Context, screen tcell.Screen, backend Backend, theme 
 		go func() {
 			defer stop()
 			page, err := backend.Transcript(task, key, cursor, history)
+			var description *archive.DescriptionSelection
+			if err == nil {
+				if provider, ok := backend.(DescriptionBackend); ok {
+					value, descriptionErr := provider.Descriptions(task, key)
+					// A current description is optional enrichment. An unrelated
+					// archive write between the two requests cannot invalidate
+					// the transcript page that already succeeded.
+					if descriptionErr == nil && value.Boundary == page.Boundary {
+						description = &value
+					}
+				}
+			}
 			select {
-			case results <- result{id: id, index: index, kind: "detail", key: key, page: page, err: err}:
+			case results <- result{id: id, index: index, kind: "detail", key: key, page: page, description: description, err: err}:
 			case <-ctx.Done():
 			}
 		}()
@@ -191,6 +204,7 @@ func runScreen(ctx context.Context, screen tcell.Screen, backend Backend, theme 
 				}
 				m.transcriptPage = r.index
 				m.page = r.page
+				m.descriptionSelection = r.description
 				m.detailKey = r.key
 				m.pageKey = r.key
 				m.notice = ""
