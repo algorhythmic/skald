@@ -36,6 +36,32 @@ func (s collectorSink) Accept(ctx context.Context, d sessioncapture.Delivery) (s
 	return sessioncapture.Acknowledgement{}, errors.New("delivery_source_not_registered")
 }
 
+// AcceptBatch resolves every configured source before the archive's atomic
+// group transaction. No spool lock is held across this external sink call.
+func (s collectorSink) AcceptBatch(ctx context.Context, deliveries []sessioncapture.Delivery) ([]sessioncapture.Acknowledgement, error) {
+	sources := s.collector.Sources()
+	registrations := make([]archive.Registration, len(deliveries))
+	for i, d := range deliveries {
+		found := false
+		for _, source := range sources {
+			if source.Source == d.Source {
+				registrations[i] = source
+				found = true
+				s.collector.invalidateCaptureCheckpoint(d.Source.Key())
+				break
+			}
+		}
+		if !found {
+			return nil, errors.New("delivery_source_not_registered")
+		}
+	}
+	acks, err := s.collector.Store.AcceptCaptureBatch(ctx, localDestination, registrations, deliveries)
+	if err != nil {
+		s.collector.Metrics.Add("capture_group_fallbacks", 1)
+	}
+	return acks, err
+}
+
 // A snapshot lives for one Scan only. It is loaded after discovery and retry
 // delivery, and each source is invalidated before a producer or sink mutation.
 // Every new pass reconciles durable positions, including external repairs and

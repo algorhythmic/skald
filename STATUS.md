@@ -1,6 +1,6 @@
 # Skald implementation status
 
-Updated 2026-10-22. **The Skald-owned OHS producer implementation batches are complete and verified locally.**
+Updated 2026-10-23. **The Skald-owned OHS producer implementation batches are complete and verified locally.**
 Skald can now enroll primary conversations and optional Claude children in selected roots and
 Devin desktop session stores (`acp-messages` SQLite),
 retain independent history, serve bounded reads, and back up/restore its archive.
@@ -8,6 +8,29 @@ The TUI browses project groups, bounded excerpts, native recaps and transcript
 history through the socket API. Nine scoped MCP tools expose bounded reads to
 agents. Optional pinned Braid lexical retrieval is implemented. Peer runtime
 integration and the full release gates below remain open.
+
+## Capture write amplification — 2026-10-23
+
+Small captures now share bounded spool, archive and acknowledgement transactions
+(up to 16 envelopes / 1 MiB), with a cooperative 25 ms staging age target.
+Unchanged mutable projections skip updates. New-session enrollment invalidates
+only affected health-cache entries, preventing archive-wide health-write bursts.
+Exact receipts, per-source order,
+suppression, atomic checkpoints and SQLite FULL synchronization are preserved.
+Schema 8 and existing indexes remain unchanged; no migration backup is required.
+
+The matched 16-source synthetic workload reduced logical writes from 107.77 to
+67.33 MB (**37.5%**) and kernel-accounted storage writes from 205.93 to 80.93 MB
+(**60.7%**), with checkpoint parity and restart recovery verified. The separate
+archive benchmark reduced WAL bytes by 78.1%. The single-source control showed
+no write improvement; these gains depend on concurrent small captures. See the
+[write-amplification receipt](docs/WRITE-AMPLIFICATION-2026-10-23.md) for bounds,
+tests, raw measurements and deployment disposition.
+
+The final build is installed locally with archive identity and schema 8 preserved,
+679 sessions, 303,843 record versions and zero queued deliveries at startup
+verification. Checkpoint/health-flush errors and grouped fallbacks were zero.
+Source configuration is unchanged; OTLP export remains off and L1 remains open.
 
 ## Resource and storage completion batch — 2026-10-22
 

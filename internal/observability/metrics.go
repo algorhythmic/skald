@@ -52,7 +52,7 @@ func (c Config) Validate() error {
 	return nil
 }
 
-var counterNames = []string{"scans", "source_checks", "file_cache_hits", "capture_attempts", "capture_input_bytes", "captured_records", "capture_errors", "checkpoint_snapshot_loads", "checkpoint_snapshot_errors", "health_flush_calls", "health_heartbeat_transactions", "health_heartbeat_sources", "health_flush_errors", "empty_polls_skipped"}
+var counterNames = []string{"scans", "source_checks", "file_cache_hits", "capture_attempts", "capture_input_bytes", "captured_records", "capture_errors", "checkpoint_snapshot_loads", "checkpoint_snapshot_errors", "health_flush_calls", "health_heartbeat_transactions", "health_heartbeat_sources", "health_flush_errors", "empty_polls_skipped", "capture_group_flushes", "capture_group_batches", "capture_group_fallbacks"}
 var durationNames = []string{"scan", "capture", "checkpoint_snapshot"}
 var gaugeNames = []string{"data_allocated_bytes", "database_allocated_bytes", "wal_allocated_bytes", "spool_allocated_bytes", "recovery_allocated_bytes", "filesystem_free_bytes", "max_database_bytes", "capture_pending", "capture_pending_bytes", "sources_available", "sources_unavailable", "sources_blocked", "sources_capture_gaps", "operational_sample_errors"}
 

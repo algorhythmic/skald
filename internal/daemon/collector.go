@@ -113,7 +113,12 @@ func (c *Collector) Scan(ctx context.Context) bool {
 	c.loadCaptureCheckpoints(ctx)
 	defer func() { c.checkpoints = nil }()
 	more := false
+	stage := captureStage{collector: c}
+	defer func() { stage.flush(ctx) }()
 	for _, source := range c.Sources() {
+		if len(stage.candidates) > 0 && time.Since(stage.started) >= captureStageAge {
+			more = stage.flush(ctx) || more
+		}
 		if ctx.Err() != nil {
 			return false
 		}
@@ -189,54 +194,17 @@ func (c *Collector) Scan(ctx context.Context) bool {
 			_ = c.Store.ObserveHealth(ctx, source, "unavailable", time.Now())
 			continue
 		}
-		if err := c.acceptCapture(ctx, source, cp, batch); err != nil {
-			code := "archive_write_failed"
-			if errors.Is(err, archive.ErrCapacity) || errors.Is(err, capturespool.ErrCapacity) {
-				code = "capture_capacity_limit"
-			}
-			if err.Error() == "capture_suppressed" {
-				code = "capture_suppressed"
-			}
-			if err.Error() == "capture_delivery_pending" {
-				code = "capture_delivery_pending"
-			}
-			c.issue(source.Key(), code)
-			_ = c.Store.ObserveHealth(ctx, source, "blocked", time.Now())
+		candidate := captureCandidate{source: source, previous: cp, batch: batch, stamp: stamp, stampErr: stampErr}
+		if staged, flushedMore := stage.add(ctx, candidate); staged {
+			more = more || flushedMore
 			continue
 		}
-		c.Metrics.Add("captured_records", int64(len(batch.Records)))
-		health, issue := captureHealth(batch)
-		// A durable receipt replay need not write the sink again, but this file
-		// observation can recover availability after an intervening source loss.
-		if err := c.Store.ObserveHealth(ctx, source, health, time.Now()); err != nil {
-			c.issue(source.Key(), "archive_write_failed")
-			continue
+		more = stage.flush(ctx) || more
+		if c.finishCapture(ctx, candidate, c.acceptCapture(ctx, source, cp, batch)) {
+			more = more || batch.More
 		}
-		c.issue(source.Key(), issue)
-
-		consumed := batch.Checkpoint.Offset == stamp.Size
-		if source.Provider == sessioncapture.Devin {
-			// The canonical dump, not the file size, is the captured extent.
-			consumed = true
-		}
-		// Stable partial and blocked tails cannot progress until the source
-		// changes. Cache their result too, while keeping the same periodic
-		// prefix audit and per-poll identity/size/mtime/ctime checks. A hot
-		// Devin WAL still needs its activity probe and quiet-window transition.
-		cacheable := !batch.More && (consumed || batch.Pending || batch.Blocked)
-		if source.Provider == sessioncapture.Devin && batch.Pending {
-			cacheable = false
-		}
-		if cacheable && stampErr == nil {
-			if after, err := sourceStamp(source); err == nil && after == stamp {
-				if c.verified == nil {
-					c.verified = map[string]verifiedFile{}
-				}
-				c.verified[source.Key()] = verifiedFile{Stamp: stamp, Checkpoint: batch.Checkpoint, At: time.Now(), Health: health, Issue: issue}
-			}
-		}
-		more = more || batch.More
 	}
+	more = stage.flush(ctx) || more
 	return more
 }
 

@@ -3,9 +3,17 @@
 `capturespool` is Skald's local durable boundary between `sessioncapture.Read`
 and one or more named sinks. It stores the complete immutable delivery envelope
 and advances the producer checkpoint in the same SQLite transaction. A collector
-must call `Enqueue` successfully before reading beyond the candidate checkpoint.
+must call `Enqueue` or `EnqueueBatch` successfully before reading beyond the candidate checkpoint.
 The stored `batch_id` remains stable across restarts and retries. The spool is
 an independent private database, not a table in the archive.
+
+`EnqueueBatch(ctx, deliveries, destinations)` adds an optional atomic group of
+at most 16 deliveries and 1 MiB total encoded envelope bytes. Every envelope and
+producer checkpoint commits together or none does. Ordered deliveries for one
+source must form an exact checkpoint chain. A failed group, including capacity
+or cancellation, advances no producer. The scalar `Enqueue` path retains the
+existing supported individual-envelope size limit. These APIs share the same
+v1 envelope, checkpoint and destination registry formats.
 
 The caller opens one directory with an exact destination registry and positive
 `Limits{MaxPending, MaxBytes}`. Both limits count envelopes awaiting at least
@@ -49,8 +57,19 @@ sink must make a previously committed batch retry return its durable receipt
 if it wants to recover a lost response. Acknowledgement for one destination
 does not advance another. Deliveries stay ordered by source for each destination.
 A failed source does not block attempts on unrelated sources in the same drain.
-The method returns the number of committed receipts and a joined error for any
-failed attempts; callers should inspect both.
+The method returns the number of committed receipts and a joined error for
+envelopes that remain failed after fallback; callers should inspect both.
+
+A sink can optionally implement `capturespool.BatchSink.AcceptBatch`. The spool
+offers bounded groups containing only the oldest unacknowledged delivery from
+each eligible source. Returned acknowledgements must align with every offered
+delivery and pass the ordinary exact receipt validation. Group errors or
+malformed acknowledgements fall back to individual acceptance, so sinks must
+preserve durable retry receipts even when an acceptance response is lost.
+Skald's archive commits a group's records, checkpoints and receipts atomically.
+The spool commits validated acknowledgements, destination checkpoints and
+pruning in one transaction; a receipt failure leaves all affected envelopes
+pending for exact retry. No spool mutex is held across sink calls.
 
 After all configured destinations acknowledge a delivery, its raw envelope and
 per-delivery receipts are deleted. The spool retains the batch ID with a digest

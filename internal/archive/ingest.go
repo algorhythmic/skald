@@ -79,9 +79,6 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 		if err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET active=0,health='unconfigured'"); err != nil {
-			return err
-		}
 	}
 	seen := map[string]bool{}
 	for _, r := range registrations {
@@ -147,7 +144,14 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 			return errors.New("stream_conversation_conflict")
 		}
 		if _, err := tx.ExecContext(ctx, `INSERT INTO stream_locators VALUES (?,?,?,1,'unknown',NULL,?)
-   ON CONFLICT(stream_key) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,active=1,health='unknown'`, r.Key(), r.Root, r.Path, r.ConversationID); err != nil {
+   ON CONFLICT(stream_key) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,active=1,health='unknown' WHERE (stream_locators.root,stream_locators.relative_path,stream_locators.active,stream_locators.health) IS NOT (excluded.root,excluded.relative_path,1,'unknown')`, r.Key(), r.Root, r.Path, r.ConversationID); err != nil {
+			return err
+		}
+	}
+	// Leave retained registrations active rather than deactivating and restoring
+	// every locator. Only removed streams need the availability transition.
+	for key := range removed {
+		if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET active=0,health='unconfigured' WHERE stream_key=?", key); err != nil {
 			return err
 		}
 	}
@@ -173,7 +177,15 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	s.healthChecks = nil
+	// Only locators touched by this committed registration lost their previous
+	// availability observation. Discovery enrollment must not force every other
+	// source to persist a fresh health transition on the next scan.
+	for key := range seen {
+		delete(s.healthChecks, key)
+	}
+	for key := range removed {
+		delete(s.healthChecks, key)
+	}
 	return nil
 }
 
@@ -210,18 +222,42 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 	return s.ingest(ctx, r, previous, batch, now, nil)
 }
 
-// ingest requires the writer mutex. A delivery receipt shares the record and
-// checkpoint transaction, so an uncertain response can be retried after restart.
+// ingest requires the writer mutex. Health observations become visible only
+// after the transaction that durably accepted their evidence commits.
 func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time, receipt *sessioncapture.Acknowledgement) error {
-	if err := r.Validate(); err != nil {
+	needed, err := validateIngest(r, previous, batch)
+	if err != nil {
 		return err
+	}
+	if err := s.checkIngestSpace(ctx, s.db, needed); err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	health, err := s.ingestTx(ctx, tx, r, previous, batch, now, receipt)
+	if err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return capacityError(err)
+	}
+	s.rememberHealth(r.Key(), health, now)
+	return nil
+}
+
+func validateIngest(r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch) (uint64, error) {
+	if err := r.Validate(); err != nil {
+		return 0, err
 	}
 	cp := batch.Checkpoint
 	if cp.Version != 1 || cp.SourceKey != r.Key() || !sessionrecord.ValidDigest(cp.PrefixDigest) || cp.Offset < 0 || cp.Ordinal < 0 || cp.ParsedOffset < 0 || cp.ParsedOffset > cp.Offset {
-		return errors.New("invalid_candidate_checkpoint")
+		return 0, errors.New("invalid_candidate_checkpoint")
 	}
 	if cp.Epoch < previous.Epoch || cp.Epoch > previous.Epoch+1 || (cp.Epoch == previous.Epoch && (cp.Offset < previous.Offset || cp.Ordinal < previous.Ordinal)) {
-		return errors.New("checkpoint_regression")
+		return 0, errors.New("checkpoint_regression")
 	}
 	var needed uint64
 	baseOffset, baseOrdinal := previous.Offset, previous.Ordinal
@@ -230,74 +266,80 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
 		baseOrdinal = 0
 	}
 	if previous.Generation != "" && cp.Epoch == previous.Epoch && cp.Generation != previous.Generation {
-		return errors.New("generation_conflict")
+		return 0, errors.New("generation_conflict")
 	}
 	for i, item := range batch.Records {
 		rec := item.Record
 		if err := rec.VerifyRaw(item.Raw); err != nil {
-			return err
+			return 0, err
 		}
 		if rec.Provider != r.Provider || rec.SourceNamespace != r.Namespace || rec.ConversationKey == nil || *rec.ConversationKey != sessionrecord.Conversation(r.Namespace, cp.ConversationID) || rec.SourceOrder == nil || rec.SourceOrder.StreamGeneration != cp.Generation {
-			return errors.New("batch_source_mismatch")
+			return 0, errors.New("batch_source_mismatch")
 		}
 		if rec.SourceOrder.Ordinal != baseOrdinal+int64(i) {
-			return errors.New("candidate_order_mismatch")
+			return 0, errors.New("candidate_order_mismatch")
 		}
 		baseOffset += int64(len(item.Raw))
 		needed += uint64(len(item.Raw) + len(encode(rec))*2 + 4096)
 	}
 	if cp.Offset != baseOffset || cp.Ordinal != baseOrdinal+int64(len(batch.Records)) {
-		return errors.New("candidate_boundary_mismatch")
+		return 0, errors.New("candidate_boundary_mismatch")
 	}
+	return needed, nil
+}
+
+func (s *Store) checkIngestSpace(ctx context.Context, q rowQuerier, needed uint64) error {
 	if err := s.checkSpace(needed); err != nil {
 		return err
 	}
 	if needed > 0 {
 		var pages, size int64
-		if err := s.db.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pages); err != nil {
+		if err := q.QueryRowContext(ctx, "PRAGMA page_count").Scan(&pages); err != nil {
 			return err
 		}
-		if err := s.db.QueryRowContext(ctx, "PRAGMA page_size").Scan(&size); err != nil {
+		if err := q.QueryRowContext(ctx, "PRAGMA page_size").Scan(&size); err != nil {
 			return err
 		}
 		if pages*size >= s.options.MaxDatabaseBytes {
 			return ErrCapacity
 		}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	return nil
+}
+
+// ingestTx writes records, checkpoint and optional receipt into its caller's
+// transaction. It must not update the in-memory health cache before commit.
+func (s *Store) ingestTx(ctx context.Context, tx *sql.Tx, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time, receipt *sessioncapture.Acknowledgement) (string, error) {
+	cp := batch.Checkpoint
 	stored, err := checkpoint(ctx, tx, r.Key())
 	if err != nil {
-		return err
+		return "", err
 	}
 	if stored != previous {
-		return ErrCheckpoint
+		return "", ErrCheckpoint
 	}
 	var active int
 	if err := tx.QueryRowContext(ctx, "SELECT active FROM stream_locators WHERE stream_key=?", r.Key()).Scan(&active); err != nil {
-		return err
+		return "", err
 	}
 	if active != 1 {
-		return errors.New("source_not_registered")
+		return "", errors.New("source_not_registered")
 	}
 	conversation := ""
 	if cp.ConversationID != "" {
 		conversation = sessionrecord.Conversation(r.Namespace, cp.ConversationID)
 	}
 	if err := checkSuppression(ctx, tx, r.Namespace, conversation, ""); err != nil {
-		return err
+		return "", err
 	}
 	if cp.Generation != "" {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO stream_generations VALUES (?,?,?) ON CONFLICT DO NOTHING", r.Key(), cp.Generation, cp.Epoch); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if cp.ConversationID != "" {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO sessions VALUES (?,?,?,'unknown') ON CONFLICT DO NOTHING", sessionrecord.Conversation(r.Namespace, cp.ConversationID), r.Namespace, cp.ConversationID); err != nil {
-			return err
+			return "", err
 		}
 	}
 	for _, item := range batch.Records {
@@ -305,43 +347,43 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
 		var suppressed int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM purge_tombstones WHERE namespace=? AND
    ((scope_kind='source' AND scope_key=?) OR (scope_kind='conversation' AND scope_key=?) OR (scope_kind='record' AND scope_key=?))`, r.Namespace, r.Namespace, *rec.ConversationKey, rec.RecordKey).Scan(&suppressed); err != nil {
-			return err
+			return "", err
 		}
 		if suppressed > 0 {
-			return errors.New("capture_suppressed")
+			return "", errors.New("capture_suppressed")
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO content_objects VALUES (?,?,'application/jsonl',?)", rec.SourceRevision, len(item.Raw), item.Raw); err != nil {
-			return capacityError(err)
+			return "", capacityError(err)
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO artifacts VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", rec.RecordKey, r.Namespace, rec.OriginScope.Kind, rec.OriginScope.Key, *rec.ConversationKey); err != nil {
-			return err
+			return "", err
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO artifact_versions VALUES (?,?,?) ON CONFLICT DO NOTHING", rec.RecordKey, rec.SourceRevision, stamp(rec.ObservedAt)); err != nil {
-			return err
+			return "", err
 		}
 		var sourceTime any
 		if rec.SourceTime != nil {
 			sourceTime = stamp(*rec.SourceTime)
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO normalizations VALUES (?,?,?,?,?,?,?,?,?)", rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, rec.ContractVersion, rec.Kind, sourceTime, rec.SourceOrder.StreamGeneration, rec.SourceOrder.Ordinal, encode(rec)); err != nil {
-			return capacityError(err)
+			return "", capacityError(err)
 		}
 		result, err := tx.ExecContext(ctx, "INSERT INTO record_observations VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING", r.Key(), cp.Generation, rec.SourceOrder.Ordinal, rec.RecordKey, rec.SourceRevision, stamp(now))
 		if err != nil {
-			return err
+			return "", err
 		}
 		inserted, _ := result.RowsAffected()
 		if inserted > 0 {
 			var priorRevision string
 			priorErr := tx.QueryRowContext(ctx, "SELECT source_revision FROM record_heads WHERE record_key=?", rec.RecordKey).Scan(&priorRevision)
 			if priorErr != nil && priorErr != sql.ErrNoRows {
-				return priorErr
+				return "", priorErr
 			}
-			if _, err := tx.ExecContext(ctx, `INSERT INTO record_heads VALUES (?,?,?) ON CONFLICT(record_key) DO UPDATE SET source_revision=excluded.source_revision,adapter_version=excluded.adapter_version`, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion); err != nil {
-				return err
+			if _, err := tx.ExecContext(ctx, `INSERT INTO record_heads VALUES (?,?,?) ON CONFLICT(record_key) DO UPDATE SET source_revision=excluded.source_revision,adapter_version=excluded.adapter_version WHERE record_heads.source_revision IS NOT excluded.source_revision OR record_heads.adapter_version IS NOT excluded.adapter_version`, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion); err != nil {
+				return "", err
 			}
 			if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,record_key,source_revision,payload_json) VALUES ('record',?,?,?,?)", r.Namespace, rec.RecordKey, rec.SourceRevision, encode(map[string]any{"stream": r.Key(), "generation": cp.Generation, "ordinal": rec.SourceOrder.Ordinal, "adapter_version": rec.AdapterVersion, "correction": priorErr == nil && priorRevision != rec.SourceRevision})); err != nil {
-				return err
+				return "", err
 			}
 			if rec.Kind == "title" && rec.Body.Text != "" {
 				text := []rune(rec.Body.Text)
@@ -355,10 +397,10 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
  title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal,origin='native'
  WHERE session_titles.origin IN ('derived','continuation') OR (session_titles.stream_key=excluded.stream_key AND (excluded.epoch>session_titles.epoch OR
  (excluded.epoch=session_titles.epoch AND excluded.ordinal>=session_titles.ordinal)))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, string(text), r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
-					return err
+					return "", err
 				}
-				if _, err := tx.ExecContext(ctx, "UPDATE session_titles SET ordering_ambiguous=1 WHERE conversation_key=? AND stream_key!=?", *rec.ConversationKey, r.Key()); err != nil {
-					return err
+				if _, err := tx.ExecContext(ctx, "UPDATE session_titles SET ordering_ambiguous=1 WHERE ordering_ambiguous=0 AND conversation_key=? AND stream_key!=?", *rec.ConversationKey, r.Key()); err != nil {
+					return "", err
 				}
 			} else if title, ok := derivedTitle(rec); ok {
 				// Earliest eligible evidence wins within a stream; a native title
@@ -370,38 +412,38 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
  title=excluded.title,epoch=excluded.epoch,ordinal=excluded.ordinal,origin='derived'
  WHERE session_titles.origin='continuation' OR (session_titles.origin='derived' AND session_titles.stream_key=excluded.stream_key AND (excluded.epoch<session_titles.epoch OR
  (excluded.epoch=session_titles.epoch AND excluded.ordinal<session_titles.ordinal)))`, *rec.ConversationKey, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, title, r.Key(), cp.Epoch, rec.SourceOrder.Ordinal); err != nil {
-					return err
+					return "", err
 				}
-				if _, err := tx.ExecContext(ctx, "UPDATE session_titles SET ordering_ambiguous=1 WHERE conversation_key=? AND stream_key!=? AND origin='derived'", *rec.ConversationKey, r.Key()); err != nil {
-					return err
+				if _, err := tx.ExecContext(ctx, "UPDATE session_titles SET ordering_ambiguous=1 WHERE ordering_ambiguous=0 AND conversation_key=? AND stream_key!=? AND origin='derived'", *rec.ConversationKey, r.Key()); err != nil {
+					return "", err
 				}
 			}
 			if err := updateActivity(ctx, tx, *rec.ConversationKey, r.Key(), cp.Epoch, rec); err != nil {
-				return err
+				return "", err
 			}
 		}
 		var cwd string
 		if raw, ok := rec.Extensions["native_cwd"]; ok && json.Unmarshal(raw, &cwd) == nil && cwd != "" && len(cwd) <= 4096 {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO session_projects VALUES (?,?,?,?) ON CONFLICT DO NOTHING", *rec.ConversationKey, cwd, rec.RecordKey, rec.SourceRevision); err != nil {
-				return err
+				return "", err
 			}
 		}
 		var parent string
 		if raw, ok := rec.Extensions["native_parent"]; ok && json.Unmarshal(raw, &parent) == nil && parent != "" {
 			if err := continuationTitle(ctx, tx, *rec.ConversationKey, r.Namespace, parent, r.Key(), cp.Epoch, rec); err != nil {
-				return err
+				return "", err
 			}
 		}
 		var fp string
 		if raw, ok := rec.Extensions["native_file_path"]; ok && json.Unmarshal(raw, &fp) == nil && fp != "" {
 			if err := commonProjectDir(ctx, tx, *rec.ConversationKey, filepath.Dir(fp), rec); err != nil {
-				return err
+				return "", err
 			}
 		}
 		var nd string
 		if raw, ok := rec.Extensions["native_dir"]; ok && json.Unmarshal(raw, &nd) == nil && nd != "" {
 			if err := commonProjectDir(ctx, tx, *rec.ConversationKey, nd, rec); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
@@ -411,27 +453,27 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
 		// snapshot or a stale timestamp replaces it with record evidence.
 		conv := sessionrecord.Conversation(r.Namespace, cp.ConversationID)
 		at := stamp(batch.SourceActiveAt)
-		if _, err := tx.ExecContext(ctx, `UPDATE session_activity SET signal='working',signal_time=?,seen_time=? WHERE conversation_key=?`, at, at, conv); err != nil {
-			return err
+		if _, err := tx.ExecContext(ctx, `UPDATE session_activity SET signal='working',signal_time=?,seen_time=? WHERE conversation_key=? AND (signal IS NOT 'working' OR signal_time IS NOT ? OR seen_time IS NOT ?)`, at, at, conv, at, at); err != nil {
+			return "", err
 		}
 	}
 	for _, gap := range batch.Gaps {
 		result, err := tx.ExecContext(ctx, "INSERT INTO capture_gaps VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", r.Key(), gap.Generation, gap.Offset, gap.Code, stamp(now))
 		if err != nil {
-			return err
+			return "", err
 		}
 		n, _ := result.RowsAffected()
 		if n > 0 {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO changes(change_kind,namespace,payload_json) VALUES ('gap',?,?)", r.Namespace, encode(map[string]any{"stream": r.Key(), "generation": gap.Generation, "ordinal": gap.Ordinal, "offset": gap.Offset, "code": gap.Code})); err != nil {
-				return err
+				return "", err
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO ingest_checkpoints VALUES (?,?,?,?,?,?,?) ON CONFLICT(stream_key) DO UPDATE SET generation=excluded.generation,captured_offset=excluded.captured_offset,parsed_offset=excluded.parsed_offset,ordinal=excluded.ordinal,checkpoint_json=excluded.checkpoint_json,has_gaps=excluded.has_gaps`, r.Key(), cp.Generation, cp.Offset, cp.ParsedOffset, cp.Ordinal, encode(cp), cp.HasGaps); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, `INSERT INTO ingest_checkpoints VALUES (?,?,?,?,?,?,?) ON CONFLICT(stream_key) DO UPDATE SET generation=excluded.generation,captured_offset=excluded.captured_offset,parsed_offset=excluded.parsed_offset,ordinal=excluded.ordinal,checkpoint_json=excluded.checkpoint_json,has_gaps=excluded.has_gaps WHERE (ingest_checkpoints.generation,ingest_checkpoints.captured_offset,ingest_checkpoints.parsed_offset,ingest_checkpoints.ordinal,ingest_checkpoints.checkpoint_json,ingest_checkpoints.has_gaps) IS NOT (excluded.generation,excluded.captured_offset,excluded.parsed_offset,excluded.ordinal,excluded.checkpoint_json,excluded.has_gaps)`, r.Key(), cp.Generation, cp.Offset, cp.ParsedOffset, cp.Ordinal, encode(cp), cp.HasGaps); err != nil {
+		return "", err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET conversation_id=? WHERE stream_key=?", cp.ConversationID, r.Key()); err != nil {
-		return err
+	if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET conversation_id=? WHERE stream_key=? AND conversation_id IS NOT ?", cp.ConversationID, r.Key(), cp.ConversationID); err != nil {
+		return "", err
 	}
 	health := "available"
 	if batch.Pending && !batch.SourceActive {
@@ -447,21 +489,18 @@ func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapt
 		health = "blocked"
 	}
 	if err := setHealth(ctx, tx, r.Key(), r.Namespace, health, now); err != nil {
-		return err
+		return "", err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE sources SET capabilities_json=?,adapter_version=? WHERE namespace=?", encode(sessioncapture.Probe(r.Provider, cp.ProviderVersion)), sessioncapture.AdapterVersion, r.Namespace); err != nil {
-		return err
+	capabilities := encode(sessioncapture.Probe(r.Provider, cp.ProviderVersion))
+	if _, err := tx.ExecContext(ctx, "UPDATE sources SET capabilities_json=?,adapter_version=? WHERE namespace=? AND (capabilities_json IS NOT ? OR adapter_version IS NOT ?)", capabilities, sessioncapture.AdapterVersion, r.Namespace, capabilities, sessioncapture.AdapterVersion); err != nil {
+		return "", err
 	}
 	if receipt != nil {
 		if _, err := tx.ExecContext(ctx, "INSERT INTO capture_receipts VALUES (?,?,?,?,?)", receipt.Destination, receipt.BatchID, receipt.SourceKey, encode(receipt), stamp(now)); err != nil {
-			return err
+			return "", err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return capacityError(err)
-	}
-	s.rememberHealth(r.Key(), health, now)
-	return nil
+	return health, nil
 }
 
 // activitySignal extracts a conversation activity signal from one record.
@@ -533,7 +572,7 @@ func updateActivity(ctx context.Context, tx *sql.Tx, conv, stream string, epoch 
 		return err
 	}
 	if curStream != stream {
-		_, err := tx.ExecContext(ctx, "UPDATE session_activity SET ordering_ambiguous=1 WHERE conversation_key=?", conv)
+		_, err := tx.ExecContext(ctx, "UPDATE session_activity SET ordering_ambiguous=1 WHERE ordering_ambiguous=0 AND conversation_key=?", conv)
 		return err
 	}
 	if sig != "" && (curSignal == "none" || epoch > sigEpoch || (epoch == sigEpoch && ord >= sigOrd)) {
@@ -546,7 +585,7 @@ func updateActivity(ctx context.Context, tx *sql.Tx, conv, stream string, epoch 
 		}
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE session_activity SET signal=?,signal_epoch=?,signal_ordinal=?,signal_time=?,seen_epoch=?,seen_ordinal=?,seen_time=?
- WHERE conversation_key=?`, curSignal, sigEpoch, sigOrd, sigTime, seenEpoch, seenOrd, seenTime, conv)
+ WHERE conversation_key=? AND (signal,signal_epoch,signal_ordinal,signal_time,seen_epoch,seen_ordinal,seen_time) IS NOT (?,?,?,?,?,?,?)`, curSignal, sigEpoch, sigOrd, sigTime, seenEpoch, seenOrd, seenTime, conv, curSignal, sigEpoch, sigOrd, sigTime, seenEpoch, seenOrd, seenTime)
 	return err
 }
 
@@ -985,7 +1024,7 @@ func setHealth(ctx context.Context, tx *sql.Tx, key, namespace, health string, n
 	if err := tx.QueryRowContext(ctx, "SELECT health FROM stream_locators WHERE stream_key=?", key).Scan(&previous); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET health=?,checked_at=? WHERE stream_key=?", health, stamp(now), key); err != nil {
+	if _, err := tx.ExecContext(ctx, "UPDATE stream_locators SET health=?,checked_at=? WHERE stream_key=? AND (health IS NOT ? OR checked_at IS NOT ?)", health, stamp(now), key, health, stamp(now)); err != nil {
 		return err
 	}
 	if previous != health {
