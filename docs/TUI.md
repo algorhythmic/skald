@@ -35,7 +35,8 @@ remain under “no project.” Provider, source health and activity are separate
 | Enter or 2 | Read the transcript, or toggle a folded title cluster |
 | h | Open the transcript at a native recap on its current page |
 | g | Group by project, provider, source root, recency, status or all conversations |
-| O | Order rows by recent activity, title or status |
+| O | Cycle recent activity, title or status ordering (always shown in the header) |
+| R | Show all conversations together, newest activity first; jump to the top |
 | x | Hide or show idle sessions |
 | / | Filter titles, native IDs, providers, sources and projects on the loaded page |
 | N / P | Next / previous session page |
@@ -44,6 +45,9 @@ remain under “no project.” Provider, source health and activity are separate
 The overview loads up to 41 session pages per refresh, covering the 4,096-stream
 capture capacity; the sessions API still bounds each page at 100 rows. Retained
 history beyond that window remains available through `N` / `P` session paging.
+Press `R` for a global recency view across the loaded session pages. Current
+text and idle filters still apply. Missing or invalid timestamps sort last; time
+zone offsets and fractional seconds compare as actual instants.
 Grouping and folding apply to the loaded window. Within a group, rows order by newest observed activity unless
 `O` selects title or status ordering, and project groups rank by live evidence
 first. Project associations are bounded at

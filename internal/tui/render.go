@@ -387,10 +387,7 @@ func (m *model) draw(screen tcell.Screen) {
 		metaSpans = append(metaSpans, span{" · refreshing", m.palette.accent})
 	}
 	putSpans(screen, 2, 2, w-4, metaSpans)
-	order := ""
-	if orderNames[m.ordering] != "recent" {
-		order = " · order " + orderNames[m.ordering]
-	}
+	order := " · order " + orderNames[m.ordering]
 	title := fmt.Sprintf("sessions / by %s · page %d%s · filter: %s", groupNames[m.grouping], m.sessionPage+1, order, m.filter)
 	if m.filter == "" {
 		title = fmt.Sprintf("sessions / by %s · page %d%s · %d rows loaded", groupNames[m.grouping], m.sessionPage+1, order, len(m.rows))
@@ -557,7 +554,7 @@ func (m *model) draw(screen tcell.Screen) {
 		put(screen, 2, h-3, w-4, status, m.palette.warn)
 	}
 	// Key hints follow heimdall's footer: the key in accent, its action in dim.
-	keys := []string{"↑↓", "select", "space", "expand", "Enter", "read", "g", "group", "O", "order", "x", "idle", "/", "filter", "N/P", "pages", "?", "help", "q", "quit"}
+	keys := []string{"↑↓", "select", "space", "expand", "Enter", "read", "g", "group", "O", "order", "R", "recent all", "x", "idle", "/", "filter", "N/P", "pages", "?", "help", "q", "quit"}
 	if m.transcript {
 		keys = []string{"j/k", "scroll", "[/]", "turns", "n/p", "recaps", "space", "tools", "/", "find", "N/P", "pages", "Esc", "back", "?", "help"}
 	}
@@ -646,7 +643,7 @@ func (m *model) overlay(screen tcell.Screen, title string, lines []string) {
 }
 func (m *model) drawHelp(screen tcell.Screen) {
 	m.overlay(screen, "skald / keyboard", []string{
-		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source, recency, status or all     O  order by recent, title or status     /  filter", "x  hide/show idle sessions     h  open transcript at the latest recap     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  cycle heimdall/desktop/amber themes", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the whole archive. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
+		"Overview", "↑/↓ or j/k  select     space  expand recent context     Enter  transcript", "g  group by project, provider, source, recency, status or all     O  order by recent, title or status     /  filter", "R  all conversations, newest activity first (current filter applies)", "x  hide/show idle sessions     h  open transcript at the latest recap     N/P  next/previous session page", "", "Transcript", "j/k  scroll     PgUp/PgDn  page     Home/End or g/G  first/last line", "[/]  previous/next turn     n/p  next/previous native recap on this page", "space  unfold/fold tool details     v  include/exclude historical revisions", "/  find on this page     f/F  next/previous match     N/P  older/newer page", "i  inspect exact record reference     y  copy reference through terminal clipboard", "", "t  cycle heimdall/desktop/amber themes", "r  refresh     d  diagnostics     Esc  back     q or Ctrl-C  quit (daemon keeps running)", "", "Only explicitly configured archives are read. Text and tool payloads are never executed.", "Descriptions use the whole archive. Recap coverage and unknown ordering stay visible.", "Surface activation, Herdr/local groups and ranked search are not available yet.", "", "↑↓ scroll this help; Esc closes it."})
 }
 func (m *model) drawReference(screen tcell.Screen) {
 	e := m.selectedEntry()

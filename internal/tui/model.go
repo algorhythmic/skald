@@ -190,6 +190,30 @@ func unitRank(head row) int {
 	return rank
 }
 
+// compareObservedTime compares instants, including offsets and fractional seconds.
+// Missing or malformed timestamps sort after dated evidence.
+func compareObservedTime(a, b *string) int {
+	parse := func(value *string) (time.Time, bool) {
+		if value == nil {
+			return time.Time{}, false
+		}
+		stamp, err := time.Parse(time.RFC3339Nano, *value)
+		return stamp, err == nil
+	}
+	ta, validA := parse(a)
+	tb, validB := parse(b)
+	if validA != validB {
+		if validA {
+			return 1
+		}
+		return -1
+	}
+	if !validA {
+		return 0
+	}
+	return ta.Compare(tb)
+}
+
 // sessionLess orders sessions inside an expanded cluster the same way the
 // unit sort orders rows: status ranks urgent evidence first, title sorts
 // alphabetically, recent puts the newest record first.
@@ -200,11 +224,8 @@ func (m *model) sessionLess(a, b archive.Session) bool {
 		}
 	}
 	if orderNames[m.ordering] != "title" {
-		if (a.LastRecordTime == nil) != (b.LastRecordTime == nil) {
-			return b.LastRecordTime == nil
-		}
-		if a.LastRecordTime != nil && *a.LastRecordTime != *b.LastRecordTime {
-			return *a.LastRecordTime > *b.LastRecordTime
+		if order := compareObservedTime(a.LastRecordTime, b.LastRecordTime); order != 0 {
+			return order > 0
 		}
 	}
 	if a.Title != b.Title {
@@ -332,7 +353,7 @@ func (m *model) rebuildRows() {
 		members := m.rows[i:j]
 		u := unit{fold: foldTitle(members[0].session)}
 		for _, r := range members {
-			if t := r.session.LastRecordTime; t != nil && (u.ts == nil || *t > *u.ts) {
+			if t := r.session.LastRecordTime; compareObservedTime(t, u.ts) > 0 {
 				u.ts = t
 			}
 		}
@@ -363,11 +384,8 @@ func (m *model) rebuildRows() {
 			}
 		}
 		if orderNames[m.ordering] != "title" {
-			if (a.ts == nil) != (b.ts == nil) {
-				return b.ts == nil
-			}
-			if a.ts != nil && *a.ts != *b.ts {
-				return *a.ts > *b.ts
+			if order := compareObservedTime(a.ts, b.ts); order != 0 {
+				return order > 0
 			}
 		}
 		if a.fold != b.fold {

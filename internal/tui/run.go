@@ -446,6 +446,14 @@ func runScreen(ctx context.Context, screen tcell.Screen, backend Backend, theme 
 							m.resetDetail()
 							moved = true
 						}
+					case key == 'R':
+						m.grouping = len(groupNames) - 1 // all conversations
+						m.ordering = 0                   // recent activity
+						m.rebuildRows()
+						m.selected = 0
+						m.overviewScroll = 0
+						m.resetDetail()
+						moved = true
 					case key == 'x':
 						oldKey := ""
 						if s := m.current(); s != nil {
