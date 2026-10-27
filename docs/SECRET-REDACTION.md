@@ -31,3 +31,15 @@ bytes; collector prefix verification must remain over the native source. Do not
 reuse a native revision for changed bytes or silently weaken delivery validation.
 Legacy consumers need explicit version rejection/negotiation. Historical scrub
 must be separately authorized; this change never edits historical rows.
+
+## Historical scrub and downstream ingestion
+
+Prefer a sanitized replacement archive generation over mutating bytes under old
+content digests. Rebuild projections, indexes and feed references consistently;
+retain native capture boundaries separately from sanitized payload lengths. Hold
+Muninn ingestion until that generation is verified; invalidate any previously
+consumed downstream data and Braid caches under an explicit recovery plan.
+Quarantining originals requires restricted encrypted storage and operator-owned
+retention. Plaintext in old backups, WAL and btrfs snapshots survives a logical
+row scrub; authorize retirement separately after a sanitized restore test. No
+historical scrub, backup retirement or deployment is performed by this change.
