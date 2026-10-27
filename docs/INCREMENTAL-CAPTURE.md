@@ -36,3 +36,10 @@ per operation as well as allocations and elapsed time; it does not predict the
 live daemon's CPU percentage. Existing raw payloads remain readable; new archive
 payloads use schema-8 compression automatically. Converting older rows remains
 an explicit management operation, never startup work.
+
+`BenchmarkPrefixPoll` additionally reports process CPU nanoseconds per changed
+file/audit capture call for append and unchanged-input cases. It compares the
+full-verification behavior at the base revision with the persisted-state path
+on identical generated inputs. It includes runtime/GC CPU but excludes filesystem
+I/O and the collector's already-existing stamp-cache fast path. Run benchmarks
+without concurrent builds/tests before interpreting their CPU figures.
