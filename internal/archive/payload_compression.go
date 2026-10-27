@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/algorhythmic/skald/sessionrecord"
@@ -96,6 +98,57 @@ func deflatePayload(raw []byte) ([]byte, error) {
 	encoder.destination = io.Discard
 	payloadEncoders.Put(encoder)
 	return output.Bytes(), nil
+}
+
+// storedPayload selects the existing schema-8 representation for a new payload.
+// A negative length marks a plain value as examined; values beyond the decoder
+// bound must remain plain even when their compressed form would be small.
+func storedPayload(raw []byte) ([]byte, int64, error) {
+	if len(raw) <= 32 || len(raw) > maxPayloadBytes {
+		return raw, -1, nil
+	}
+	packed, err := deflatePayload(raw)
+	if err != nil {
+		return nil, 0, err
+	}
+	if len(packed)+32 >= len(raw) {
+		return raw, -1, nil
+	}
+	return packed, int64(len(raw)), nil
+}
+
+func insertContentPayload(ctx context.Context, tx *sql.Tx, revision string, raw []byte) error {
+	stored, decodedLength, err := storedPayload(raw)
+	if err != nil {
+		return err
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO content_storage(digest,byte_length,media_type,original_bytes,decoded_length)
+ VALUES (?,?,'application/jsonl',?,?) ON CONFLICT DO NOTHING`, revision, len(stored), stored, decodedLength)
+	return err
+}
+
+func insertNormalizationPayload(ctx context.Context, tx *sql.Tx, rec sessionrecord.Record, sourceTime any) error {
+	envelope := encode(rec)
+	stored, decodedLength, err := storedPayload([]byte(envelope))
+	if err != nil {
+		return err
+	}
+	var packed, digest, role any
+	if decodedLength >= 0 {
+		packed, digest = stored, sessionrecord.Digest([]byte(envelope))
+		envelope = "{}"
+	}
+	if rec.Role != nil {
+		role = *rec.Role
+	}
+	// Match the schema-8 view trigger's display metadata without inflating the
+	// envelope during description selection. SQLite trim() removes spaces only.
+	usable := strings.Trim(rec.Body.Text, " ") != "" &&
+		(rec.Availability.State == "available" || rec.Availability.State == "partial") &&
+		rec.Body.State != "unavailable" && rec.Body.State != "opaque" && rec.Body.State != "unsupported"
+	_, err = tx.ExecContext(ctx, `INSERT INTO normalization_storage(record_key,source_revision,adapter_version,contract_version,kind,source_time,stream_generation,source_ordinal,envelope_json,compressed_envelope,decoded_length,envelope_digest,display_role,display_usable)
+ VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, rec.ContractVersion, rec.Kind, sourceTime, rec.SourceOrder.StreamGeneration, rec.SourceOrder.Ordinal, envelope, packed, decodedLength, digest, role, usable)
+	return err
 }
 
 // CompressionResult reports logical savings; freed pages remain reusable by SQLite.

@@ -352,7 +352,7 @@ func (s *Store) ingestTx(ctx context.Context, tx *sql.Tx, r Registration, previo
 		if suppressed > 0 {
 			return "", errors.New("capture_suppressed")
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO content_objects VALUES (?,?,'application/jsonl',?)", rec.SourceRevision, len(item.Raw), item.Raw); err != nil {
+		if err := insertContentPayload(ctx, tx, rec.SourceRevision, item.Raw); err != nil {
 			return "", capacityError(err)
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO artifacts VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING", rec.RecordKey, r.Namespace, rec.OriginScope.Kind, rec.OriginScope.Key, *rec.ConversationKey); err != nil {
@@ -365,7 +365,7 @@ func (s *Store) ingestTx(ctx context.Context, tx *sql.Tx, r Registration, previo
 		if rec.SourceTime != nil {
 			sourceTime = stamp(*rec.SourceTime)
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO normalizations VALUES (?,?,?,?,?,?,?,?,?)", rec.RecordKey, rec.SourceRevision, rec.AdapterVersion, rec.ContractVersion, rec.Kind, sourceTime, rec.SourceOrder.StreamGeneration, rec.SourceOrder.Ordinal, encode(rec)); err != nil {
+		if err := insertNormalizationPayload(ctx, tx, rec, sourceTime); err != nil {
 			return "", capacityError(err)
 		}
 		result, err := tx.ExecContext(ctx, "INSERT INTO record_observations VALUES (?,?,?,?,?,?) ON CONFLICT DO NOTHING", r.Key(), cp.Generation, rec.SourceOrder.Ordinal, rec.RecordKey, rec.SourceRevision, stamp(now))

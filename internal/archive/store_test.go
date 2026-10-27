@@ -203,7 +203,9 @@ func TestBackupTamperingIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec("UPDATE content_storage SET original_bytes=zeroblob(byte_length)"); err != nil {
+	// Keep this fixture focused on digest verification, independently of whether
+	// ingestion originally stored the content plain or compressed.
+	if _, err := db.Exec("UPDATE content_storage SET original_bytes=zeroblob(byte_length),decoded_length=-1"); err != nil {
 		t.Fatal(err)
 	}
 	db.Close()
