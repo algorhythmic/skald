@@ -46,3 +46,14 @@ data under an explicit recovery plan. Quarantine originals in restricted encrypt
 storage with operator-owned retention. Plaintext in old backups, WAL and btrfs
 snapshots survives a logical scrub; authorize retirement separately after a
 sanitized restore test. This change never rewrites historical archive rows.
+
+## Backup bounds
+
+Rows are streamed individually. Revision remapping uses a private disk-backed
+scratch index with a 1 MiB SQLite page-cache target, committed in batches of128
+mappings. Destination index sorts may spill sanitized keys to disk. Scratch files
+contain only whole-content digests and are removed on success or failure.
+The default maximum is2,000,000 content objects. Crossing it returns the stable
+`backup_object_limit` error without publishing a backup; capture history is not
+evicted and the source is unchanged. There is no unbounded in-memory fallback.
+Tests configure much smaller limits/batches to exercise all boundary cases quickly.

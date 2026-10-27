@@ -20,13 +20,16 @@ func quoteIdentifier(s string) string { return `"` + strings.ReplaceAll(s, `"`, 
 // logicalBackup never copies source pages, freelists, WAL or unredacted payloads
 // into a destination. It streams a consistent read snapshot into a fresh DB,
 // remapping sanitized content references before inserting each row. Heap state
-// contains only digest mappings, not a second archive-sized payload copy.
-func logicalBackup(ctx context.Context, source *sql.DB, path string) (failure error) {
+// uses a disk-backed bounded-cache digest index, not an archive-sized Go map.
+func logicalBackup(ctx context.Context, source *sql.DB, path string) error {
+	return logicalBackupWithLimits(ctx, source, path, defaultBackupLimits)
+}
+func logicalBackupWithLimits(ctx context.Context, source *sql.DB, path string, limits backupLimits) (failure error) {
 	defer func() {
 		if recover() != nil {
 			failure = errors.New("sanitized_backup_failed")
 		}
-		if failure != nil {
+		if failure != nil && !errors.Is(failure, ErrBackupObjectLimit) {
 			failure = errors.New("sanitized_backup_failed")
 		}
 	}()
@@ -68,7 +71,7 @@ func logicalBackup(ctx context.Context, source *sql.DB, path string) (failure er
 	if _, err = dest.ExecContext(ctx, `PRAGMA foreign_keys=OFF`); err != nil {
 		return err
 	}
-	if _, err = dest.ExecContext(ctx, "PRAGMA temp_store=MEMORY"); err != nil {
+	if _, err = dest.ExecContext(ctx, "PRAGMA temp_store=FILE"); err != nil {
 		return err
 	}
 	if _, err = dest.ExecContext(ctx, "PRAGMA journal_mode=DELETE"); err != nil {
@@ -102,7 +105,11 @@ func logicalBackup(ctx context.Context, source *sql.DB, path string) (failure er
 			order = append(order, name)
 		}
 	}
-	revisions := map[string]string{}
+	revisions, err := newRevisionIndex(ctx, path, limits)
+	if err != nil {
+		return err
+	}
+	defer revisions.close()
 	changed := false
 	for _, table := range order {
 		query := "SELECT t.* FROM " + quoteIdentifier(table) + " t"
@@ -182,11 +189,10 @@ func logicalBackup(ctx context.Context, source *sql.DB, path string) (failure er
 					return errors.New("invalid_backup_digest")
 				}
 				revision := sessionrecord.Digest(sanitized)
-				revisions[old] = revision
-				if len(revisions) > 2000000 {
+				if err = revisions.put(old, revision); err != nil {
 					statement.Close()
 					rows.Close()
-					return errors.New("backup_record_limit")
+					return err
 				}
 				set("digest", revision)
 				set("original_bytes", sanitized)
@@ -308,11 +314,9 @@ func logicalBackup(ctx context.Context, source *sql.DB, path string) (failure er
 	return read.Commit()
 }
 
-func backupText(s, key string, revisions map[string]string) (string, error) {
+func backupText(s, key string, revisions *revisionIndex) (string, error) {
 	if key == "source_revision" {
-		if next, ok := revisions[s]; ok {
-			return next, nil
-		}
+		return revisions.get(s)
 	}
 	counts := secretredact.Counts()
 	if secretredact.Inspect([]byte(s), counts) != nil {
@@ -328,6 +332,7 @@ func backupText(s, key string, revisions map[string]string) (string, error) {
 		return string(out), nil
 	}
 	changed := false
+	var lookupErr error
 	var walk func(any)
 	walk = func(v any) {
 		switch x := v.(type) {
@@ -335,7 +340,9 @@ func backupText(s, key string, revisions map[string]string) (string, error) {
 			for k, v := range x {
 				if k == "source_revision" {
 					if old, ok := v.(string); ok {
-						if next, ok := revisions[old]; ok && next != old {
+						if next, e := revisions.get(old); e != nil {
+							lookupErr = e
+						} else if next != old {
 							x[k] = next
 							changed = true
 						}
@@ -350,6 +357,9 @@ func backupText(s, key string, revisions map[string]string) (string, error) {
 		}
 	}
 	walk(v)
+	if lookupErr != nil {
+		return "", lookupErr
+	}
 	if changed {
 		b, e := json.Marshal(v)
 		if e != nil {
