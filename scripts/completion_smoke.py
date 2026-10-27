@@ -72,7 +72,9 @@ with tempfile.TemporaryDirectory(prefix="skald-completion-") as temporary:
         assert "SECRET_SYSTEM" not in json.dumps(before) and "OTHER_NAMESPACE" not in json.dumps(before)
         assert before["context_bytes"] == len(json.dumps(before["context"], ensure_ascii=False, separators=(",", ":")).encode())
         converted = cli("compress", "--max-rows", "1000", "--max-input-bytes", str(64 << 20), "--socket", socket)
-        assert converted["compressed"] > 0
+        # Fresh ingest already applies the payload policy. Explicit maintenance
+        # has no legacy rows to convert and must not rewrite processed values.
+        assert converted["examined"] == 0 and converted["compressed"] == 0
         after = cli(*args)
         assert after["context"] == before["context"]
         mcp = MCP(socket)

@@ -147,6 +147,11 @@ func TestCacheRejectsSymlinkAndPublicDirectory(t *testing.T) {
 	if err := os.Mkdir(config.Directory, 0755); err != nil {
 		t.Fatal(err)
 	}
+	// Mkdir's mode is filtered by the process umask. Establish the deliberately
+	// public fixture explicitly, including under a private (0077) test runner.
+	if err := os.Chmod(config.Directory, 0755); err != nil {
+		t.Fatal(err)
+	}
 	if other, err := New(config, store); err == nil {
 		other.Close()
 		t.Fatal("public cache accepted")
