@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/algorhythmic/skald/internal/archive"
-	"github.com/algorhythmic/skald/internal/client"
 )
 
 type RootStatus struct {
@@ -38,8 +37,11 @@ type Backend interface {
 	Snapshot(context.Context, string) (Snapshot, error)
 	Transcript(context.Context, string, string, bool) (archive.Page[archive.TranscriptEntry], error)
 }
+type archiveClient interface {
+	Do(context.Context, string, string, url.Values, any) error
+}
 type Remote struct {
-	Client    *client.Client
+	Client    archiveClient
 	Namespace string
 }
 
@@ -59,7 +61,7 @@ func (r Remote) Snapshot(ctx context.Context, cursor string) (Snapshot, error) {
 	// Walk every session page so grouping sees the whole archive, not just the
 	// first hundred conversation keys. The page size stays the API bound.
 	out.Sessions.Items = []archive.Session{}
-	for pages := 0; pages < 20; pages++ {
+	for pages := 0; pages < (archive.MaxEnrolledSources+99)/100; pages++ {
 		var page archive.Page[archive.Session]
 		pq := r.query()
 		pq.Set("limit", "100")
@@ -85,5 +87,19 @@ func (r Remote) Transcript(ctx context.Context, key, cursor string, history bool
 	q.Set("limit", "25")
 	q.Set("history", strconv.FormatBool(history))
 	err := r.Client.Do(ctx, "GET", "/v1/transcript", q, &out)
+	return out, err
+}
+
+// DescriptionBackend provides the archive-wide description independently of the
+// bounded transcript page. Optional for local/custom backends.
+type DescriptionBackend interface {
+	Descriptions(context.Context, string) (archive.DescriptionSelection, error)
+}
+
+func (r Remote) Descriptions(ctx context.Context, key string) (archive.DescriptionSelection, error) {
+	var out archive.DescriptionSelection
+	q := r.query()
+	q.Set("conversation", key)
+	err := r.Client.Do(ctx, "GET", "/v1/descriptions", q, &out)
 	return out, err
 }

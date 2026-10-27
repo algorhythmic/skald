@@ -21,7 +21,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const SchemaVersion = 6
+const SchemaVersion = 8
 const MaxResponseBytes = 32 << 20
 
 var ErrCapacity = errors.New("capture_capacity_limit")
@@ -236,6 +236,45 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		if _, err := s.db.Exec(string(b)); err != nil {
 			return nil, err
 		}
+		version = 6
+	}
+	if version == 6 {
+		if err := s.prepareReadIndexMigration(existing == 6); err != nil {
+			return nil, err
+		}
+		if existing == 6 {
+			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-7-"+NewID()+".sqlite")); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.setDatabaseLimit(); err != nil {
+			return nil, err
+		}
+		b, _ := migrations.ReadFile("migrations/007_read_indexes.sql")
+		if _, err := s.db.Exec(string(b)); err != nil {
+			// SQLite may already have rolled back SQLITE_FULL. Explicit rollback
+			// also covers failures that leave the migration transaction open.
+			s.db.Exec("ROLLBACK")
+			return nil, capacityError(err)
+		}
+	}
+	if version <= 7 {
+		if err := s.setDatabaseLimit(); err != nil {
+			return nil, err
+		}
+		if err := s.preparePayloadCompressionMigration(existing == 7); err != nil {
+			return nil, err
+		}
+		if existing == 7 {
+			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-8-"+NewID()+".sqlite")); err != nil {
+				return nil, err
+			}
+		}
+		b, _ := migrations.ReadFile("migrations/008_payload_compression.sql")
+		if _, err := s.db.Exec(string(b)); err != nil {
+			s.db.Exec("ROLLBACK")
+			return nil, capacityError(err)
+		}
 	}
 	if err := s.db.QueryRow("SELECT archive_instance FROM archive_meta WHERE singleton=1 AND schema_version=? AND contract_version=1", SchemaVersion).Scan(&s.instance); err != nil {
 		return nil, errors.New("invalid_archive_metadata")
@@ -246,15 +285,72 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 	if _, err := s.db.Exec("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=256"); err != nil {
 		return nil, err
 	}
-	var size int64
-	if err := s.db.QueryRow("PRAGMA page_size").Scan(&size); err != nil {
-		return nil, err
-	}
-	if _, err := s.db.Exec(fmt.Sprintf("PRAGMA max_page_count=%d", options.MaxDatabaseBytes/size)); err != nil {
+	if err := s.setDatabaseLimit(); err != nil {
 		return nil, err
 	}
 	return s, nil
 }
+
+// Reserve for pending-key indexes, their sort scratch, journal, and retained
+// verified rollback. Payload conversion itself remains an explicit operation.
+func (s *Store) preparePayloadCompressionMigration(backup bool) error {
+	var keyBytes, normalBytes, pages, size int64
+	if err := s.db.QueryRow("SELECT coalesce(sum(length(CAST(digest AS BLOB))+32),0) FROM content_objects").Scan(&keyBytes); err != nil {
+		return err
+	}
+	if err := s.db.QueryRow("SELECT coalesce(sum(length(CAST(record_key AS BLOB))+length(CAST(source_revision AS BLOB))+length(CAST(adapter_version AS BLOB))+32),0) FROM normalizations").Scan(&normalBytes); err != nil {
+		return err
+	}
+	needed := 6*(keyBytes+normalBytes) + (4 << 20)
+	if backup {
+		if err := s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
+			return err
+		}
+		if err := s.db.QueryRow("PRAGMA page_size").Scan(&size); err != nil {
+			return err
+		}
+		needed += pages * size
+	}
+	return s.checkSpace(uint64(needed))
+}
+
+func (s *Store) prepareReadIndexMigration(backup bool) error {
+	var pages, size, keyBytes int64
+	if err := s.db.QueryRow("PRAGMA page_count").Scan(&pages); err != nil {
+		return err
+	}
+	if err := s.db.QueryRow("PRAGMA page_size").Scan(&size); err != nil {
+		return err
+	}
+	if err := s.db.QueryRow("SELECT coalesce(sum(length(CAST(namespace AS BLOB))+length(CAST(record_key AS BLOB))+32),0) FROM artifacts").Scan(&keyBytes); err != nil {
+		return err
+	}
+	// Reserve for index cell overhead/page slack, then index, sort scratch and
+	// rollback journal. The SQLite page limit below enforces the actual budget.
+	indexBytes := 2*keyBytes + 8*size
+	needed := 3 * indexBytes
+	if backup {
+		needed += pages * size
+	}
+	return s.checkSpace(uint64(needed))
+}
+
+func (s *Store) setDatabaseLimit() error {
+	var size, actual int64
+	if err := s.db.QueryRow("PRAGMA page_size").Scan(&size); err != nil {
+		return err
+	}
+	limit := s.options.MaxDatabaseBytes / size
+	if err := s.db.QueryRow(fmt.Sprintf("PRAGMA max_page_count=%d", limit)).Scan(&actual); err != nil {
+		return capacityError(err)
+	}
+	// SQLite cannot lower this setting below the archive's current page count.
+	if actual > limit {
+		return ErrCapacity
+	}
+	return nil
+}
+
 func (s *Store) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

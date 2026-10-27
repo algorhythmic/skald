@@ -17,10 +17,15 @@ import (
 	"github.com/algorhythmic/skald/archivefeed"
 	"github.com/algorhythmic/skald/capturespool"
 	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/maintenance"
+	"github.com/algorhythmic/skald/internal/observability"
+	"github.com/algorhythmic/skald/internal/retrieval"
 	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 type API struct {
+	DataDir   string
+	Retrieval *retrieval.Engine
 	Store     *archive.Store
 	Collector *Collector
 	Config    Config
@@ -41,9 +46,15 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, errors.New("invalid_request"))
 		return
 	}
+	if a.diagnostics(w, r) {
+		return
+	}
 	ns, err := archive.Scope(a.Config.Namespaces(), r.URL.Query().Get("namespace"))
 	if err != nil {
 		respond(w, nil, err)
+		return
+	}
+	if a.extendedRead(w, r, ns) {
 		return
 	}
 	if r.Method == "POST" && r.URL.Path == "/manage/backup" {
@@ -67,7 +78,17 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			respond(w, nil, errors.New("invalid_request"))
 			return
 		}
-		receipt, err := a.Collector.Redact(r.Context(), ns[0], q.Get("scope"), q.Get("target"))
+		var receipt archive.RedactionReceipt
+		redact := func() error {
+			var e error
+			receipt, e = a.Collector.Redact(r.Context(), ns[0], q.Get("scope"), q.Get("target"))
+			return e
+		}
+		if a.Retrieval != nil {
+			err = a.Retrieval.WithInvalidation(redact)
+		} else {
+			err = redact()
+		}
 		respond(w, receipt, err)
 		return
 	}
@@ -103,6 +124,16 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/v1/status":
 		status, err := a.Store.Status(r.Context(), ns)
 		if err == nil {
+			if a.Retrieval != nil {
+				status["retrieval"] = "configured"
+			}
+			instance, _ := status["archive_instance"].(string)
+			backup, e := maintenance.BackupStatus(a.DataDir, a.Config.Backup, instance)
+			if e != nil {
+				status["backup"] = map[string]any{"status": "backup status unavailable", "l1_complete": false}
+			} else {
+				status["backup"] = backup
+			}
 			issues := a.Collector.Issues()
 			visible := map[string]string{}
 			for _, source := range a.Collector.Sources() {
@@ -137,7 +168,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond(w, map[string]any{
 			"contracts":      map[string]int{"sessionrecord": 1, "capture_delivery": sessioncapture.DeliveryVersion, "archive_feed": archivefeed.Version, "redaction_receipt": 1},
 			"archive_schema": archive.SchemaVersion, "archive_instance": status["archive_instance"], "namespaces": ns,
-			"features":    []string{"exact_revision_reads", "archive_snapshot_and_tail", "durable_capture_spool", "independent_destination_receipts", "logical_content_removal", "scoped_read_only_mcp", "opt_in_claude_subagents"},
+			"features":    []string{"exact_revision_reads", "archive_snapshot_and_tail", "durable_capture_spool", "independent_destination_receipts", "logical_content_removal", "scoped_read_only_mcp", "opt_in_claude_subagents", "archive_wide_descriptions", "opt_in_pinned_braid_retrieval", "compressed_payloads"},
 			"unsupported": []string{"remote_destination_transport", "odin_consumer", "physical_media_erasure"},
 		}, nil)
 	case "/v1/changes":
@@ -251,7 +282,31 @@ func Serve(ctx context.Context, cfg Config, dataDir, socket string, ready func()
 		return err
 	}
 	defer spool.Close()
-	collector := &Collector{Store: s, Spool: spool, Config: cfg}
+	metrics := observability.New()
+	if err := metrics.StartOTLP(ctx, cfg.Telemetry); err != nil {
+		return err
+	}
+	defer func() {
+		shutdown, stop := context.WithTimeout(context.Background(), 4*time.Second)
+		defer stop()
+		_ = metrics.Shutdown(shutdown)
+	}()
+	collector := &Collector{Store: s, Spool: spool, Config: cfg, Metrics: metrics, PrefixDirectory: filepath.Join(dataDir, "prefix-checkpoints")}
+	var search *retrieval.Engine
+	if cfg.Retrieval.Executable != "" {
+		if cfg.Retrieval.Directory == "" {
+			cache, e := DefaultCacheDir()
+			if e != nil {
+				return e
+			}
+			cfg.Retrieval.Directory = filepath.Join(cache, "retrieval")
+		}
+		search, err = retrieval.New(cfg.Retrieval, s)
+		if err != nil {
+			return err
+		}
+		defer search.Close()
+	}
 	if err := collector.Initialize(ctx); err != nil {
 		return err
 	}
@@ -303,7 +358,10 @@ func Serve(ctx context.Context, cfg Config, dataDir, socket string, ready func()
 	defer cancel()
 	collectDone := make(chan struct{})
 	go func() { defer close(collectDone); collector.Run(runCtx) }()
-	api := &API{Store: s, Collector: collector, Config: cfg}
+	metrics.Gauge("max_database_bytes", cfg.MaxDatabaseBytes)
+	operationsDone := make(chan struct{})
+	go func() { defer close(operationsDone); collector.sampleOperations(runCtx, dataDir) }()
+	api := &API{Store: s, Collector: collector, Config: cfg, Retrieval: search, DataDir: dataDir}
 	server := &http.Server{Handler: api, BaseContext: func(net.Listener) context.Context { return runCtx }, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 60 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 16 << 10}
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(sameUserListener{listener}) }()
@@ -328,5 +386,6 @@ func Serve(ctx context.Context, cfg Config, dataDir, socket string, ready func()
 	api.stopped = true
 	api.gate.Unlock()
 	<-collectDone
+	<-operationsDone
 	return err
 }

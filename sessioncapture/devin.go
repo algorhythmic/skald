@@ -134,6 +134,7 @@ func DevinDump(ctx context.Context, root, path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	kinds := make(map[string][]byte)
 	for rows.Next() {
 		var pos int64
 		var kind, payload string
@@ -141,7 +142,13 @@ func DevinDump(ctx context.Context, root, path string) ([]byte, error) {
 			rows.Close()
 			return nil, err
 		}
-		kindJSON, _ := json.Marshal(kind)
+		kindJSON, ok := kinds[kind]
+		if !ok {
+			kindJSON, _ = json.Marshal(kind)
+			if len(kinds) < 64 {
+				kinds[kind] = kindJSON
+			}
+		}
 		position := strconv.FormatInt(pos, 10)
 		lineBytes := len(`{"kind":`) + len(kindJSON) + len(`,"position":`) + len(position) + len(`,"payload":`) + len(payload) + len("}\n")
 		if lineBytes > devinDumpLimit-out.Len() {

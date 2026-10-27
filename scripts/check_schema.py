@@ -61,6 +61,9 @@ db.execute("INSERT INTO archive_meta VALUES (1,5,'synthetic-schema-check',1,NULL
 db.executescript((ROOT / "internal/archive/migrations/006_delivery.sql").read_text())
 assert db.execute("PRAGMA user_version").fetchone() == (6,)
 assert db.execute("SELECT schema_version FROM archive_meta").fetchone() == (6,)
+db.executescript((ROOT / "internal/archive/migrations/007_read_indexes.sql").read_text())
+assert db.execute("PRAGMA user_version").fetchone() == (7,)
+assert db.execute("SELECT schema_version FROM archive_meta").fetchone() == (7,)
 columns = [row[1] for row in db.execute("PRAGMA table_info(session_titles)")]
 assert "origin" in columns
 columns = [row[1] for row in db.execute("PRAGMA table_info(session_activity)")]
@@ -70,4 +73,29 @@ assert db.execute("SELECT count(*) FROM capture_receipts").fetchone() == (0,)
 assert db.execute("SELECT count(*) FROM redaction_receipts").fetchone() == (0,)
 assert db.execute("SELECT namespaces_json FROM archive_scope WHERE singleton=1").fetchone() == ("[]",)
 assert not db.execute("PRAGMA foreign_key_check").fetchall()
+
+# Schema eight adds only metadata/views; no payload is compressed at startup.
+# The decoder is a connection function in Go. Register a bounded equivalent for
+# standalone schema checks that inspect the compatibility views.
+import zlib
+
+def inflate_payload(data, size, digest):
+    if not isinstance(size, int) or size < 0 or size > 64 << 20:
+        raise ValueError("payload_size_limit")
+    decoder = zlib.decompressobj()
+    raw = decoder.decompress(data, size + 1)
+    if len(raw) != size or not decoder.eof or decoder.unused_data or decoder.unconsumed_tail:
+        raise ValueError("payload_length_mismatch")
+    if "sha256:" + hashlib.sha256(raw).hexdigest() != digest:
+        raise ValueError("payload_digest_mismatch")
+    return raw
+
+db.create_function("skald_inflate", 3, inflate_payload, deterministic=True)
+db.executescript((ROOT / "internal/archive/migrations/008_payload_compression.sql").read_text())
+assert db.execute("PRAGMA user_version").fetchone() == (8,)
+assert db.execute("SELECT schema_version FROM archive_meta").fetchone() == (8,)
+assert db.execute("SELECT original_bytes FROM content_objects WHERE digest=?", (digest,)).fetchone() == (raw,)
+assert not db.execute("PRAGMA foreign_key_check").fetchall()
+assert db.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
 print(f"SQLite {sqlite3.sqlite_version}: capture DDL, identity/scope constraints, immutable versions, normalization history, atomic checkpoint rollback, and daemon migrations pass")

@@ -19,7 +19,7 @@ import (
 
 func isArchiveCommand(cmd string) bool {
 	switch cmd {
-	case "serve", "status", "sessions", "artifacts", "get", "backup", "restore", "changes", "capabilities", "redact":
+	case "serve", "status", "sessions", "artifacts", "get", "backup", "backup-compress", "restore", "changes", "capabilities", "redact":
 		return true
 	}
 	return false
@@ -39,6 +39,8 @@ func runArchive(args []string, out, stderr io.Writer) error {
 	adapter := f.String("adapter", "", "exact normalization version")
 	raw := f.Bool("raw", false, "request source bytes; requires allow_raw in daemon config")
 	backup := f.String("backup", "", "verified archive backup file")
+	destination := f.String("destination", "", "new compressed backup path (default: BACKUP.zst)")
+	maxBackupBytes := f.Int64("max-backup-bytes", archive.DefaultMaxBackupBytes, "maximum expanded backup bytes (up to 16 GiB)")
 	redactionScope := f.String("scope", "", "removal scope: source, conversation, or record")
 	target := f.String("target", "", "namespace, conversation key, or record key to redact")
 	if err := f.Parse(args[1:]); err != nil {
@@ -59,7 +61,8 @@ func runArchive(args []string, out, stderr io.Writer) error {
 		"sessions":     {"socket": true, "namespace": true, "limit": true, "cursor": true},
 		"artifacts":    {"socket": true, "namespace": true, "limit": true, "cursor": true, "conversation": true},
 		"get":          {"socket": true, "namespace": true, "record": true, "revision": true, "adapter": true, "raw": true},
-		"backup":       {"socket": true}, "restore": {"backup": true, "data-dir": true},
+		"backup":       {"socket": true}, "restore": {"backup": true, "data-dir": true, "max-backup-bytes": true},
+		"backup-compress": {"backup": true, "destination": true, "max-backup-bytes": true},
 	}
 	invalid := false
 	f.Visit(func(v *flag.Flag) {
@@ -72,11 +75,21 @@ func runArchive(args []string, out, stderr io.Writer) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	if args[0] == "backup-compress" {
+		if *backup == "" {
+			return errors.New("backup_required")
+		}
+		manifest, err := archive.CompressBackup(ctx, *backup, *destination, *maxBackupBytes)
+		if err != nil {
+			return err
+		}
+		return writeJSON(out, manifest)
+	}
 	if args[0] == "restore" {
 		if *data == "" || *backup == "" {
 			return errors.New("backup_and_fresh_data_directory_required")
 		}
-		if err := archive.Restore(ctx, *backup, *data, archive.DefaultOptions()); err != nil {
+		if err := archive.RestoreWithLimit(ctx, *backup, *data, archive.DefaultOptions(), *maxBackupBytes); err != nil {
 			return err
 		}
 		return writeJSON(out, map[string]string{"restored_to": *data})

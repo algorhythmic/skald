@@ -35,25 +35,34 @@ remain under “no project.” Provider, source health and activity are separate
 | Enter or 2 | Read the transcript, or toggle a folded title cluster |
 | h | Open the transcript at a native recap on its current page |
 | g | Group by project, provider, source root, recency, status or all conversations |
-| O | Order rows by recent activity, title or status |
+| O | Cycle recent activity, title or status ordering (always shown in the header) |
+| R | Show all conversations together, newest activity first; jump to the top |
 | x | Hide or show idle sessions |
 | / | Filter titles, native IDs, providers, sources and projects on the loaded page |
 | N / P | Next / previous session page |
 | Home / End, PgUp / PgDn | Move through the loaded session page |
 
-The overview loads every session page (up to twenty pages per refresh), so
-grouping and folding see the whole archive; the sessions API still bounds each
-page at 100 rows. Within a group, rows order by newest observed activity unless
+The overview loads up to 41 session pages per refresh, covering the 4,096-stream
+capture capacity; the sessions API still bounds each page at 100 rows. Retained
+history beyond that window remains available through `N` / `P` session paging.
+Press `R` for a global recency view across the loaded session pages. Current
+text and idle filters still apply. Missing or invalid timestamps sort last; time
+zone offsets and fractional seconds compare as actual instants.
+Grouping and folding apply to the loaded window. Within a group, rows order by newest observed activity unless
 `O` selects title or status ordering, and project groups rank by live evidence
 first. Project associations are bounded at
 32 per session, with explicit truncation metadata. A filter applies to the loaded
 sessions; it is not a full archive search. Source groups label by configured root
 path; namespaces come from the daemon configuration.
 
-Expanded descriptions select a native recap or meaningful assistant text from the
-recent 25-record window. A newer assistant message becomes a labeled excerpt with
-the earlier recap retained. Newer user/tool activity leaves the recap in place and
-adds an activity notice. With neither, the native title remains the fallback.
+Expanded descriptions select a usable native recap or meaningful assistant text
+from the whole archived conversation through `GET /v1/descriptions`. A provably
+newer assistant message in the same stream/generation becomes a labeled excerpt,
+with up to four prior recaps retained. Newer user/tool activity leaves the recap
+in place and adds an activity notice. With neither, a native title is the
+fallback; otherwise the description is explicitly unavailable. Display text is
+bounded at 4 KiB per item and exact record/revision/adapter references survive
+clipping. The transcript remains a separate 25-record page.
 
 A conversation without a native title record shows a derived title instead of its
 native ID: the first line of the earliest substantive user message, labeled
@@ -80,9 +89,9 @@ and `○` for idle or unknown. The row metadata shows `activity` (working, idle,
 unknown), the newest record's source time, and flags ambiguous cross-stream
 signal ordering.
 
-This is a bounded display selection, not the plan's full archive-wide description
-projection. An earlier recap outside the window requires history paging. No model
-summarizes anything. Ordering ambiguity across streams or rewrite epochs is labeled;
+Selection examines current record metadata across the archive, rather than
+inferring a description from the transcript's current page. No model summarizes
+anything. Ordering ambiguity across streams or rewrite epochs is labeled;
 source arrival time is never used to invent chronology. Unknown recap coverage
 stays unknown. Activity is archived evidence: lifecycle observations where
 providers emit them, newest-record shape where they do not — never live working
@@ -161,8 +170,9 @@ help and reference panels scroll in smaller layouts.
 
 The TUI reads only through the daemon socket. It opens no database and needs no
 Heimdall, Braid or Herdr connection. Source activation (`o`), ranked search (`s`),
-Herdr/local group authoring and archive-wide description projections are not yet
-implemented; unavailable actions say so explicitly.
+Herdr/local group authoring and a TUI search screen are not yet implemented;
+unavailable actions say so explicitly. Scoped Braid context retrieval is exposed
+through the CLI and MCP when configured, independently of the TUI.
 
 ## Verification
 

@@ -39,19 +39,28 @@ func Probe(provider, version string) Capabilities {
 		ConversationAlias: Capability{State: "unsupported", Reason: "conversation_alias_contract_not_implemented"},
 		LiveCollection:    Capability{State: "unknown", Reason: "configured_file_collector_requires_source_verification"},
 		SurfaceActivation: Capability{State: "unsupported", Reason: "surface_adapter_not_implemented"}}
-	if provider == Claude && version == "2.1.263" {
+	if provider == Claude && (version == "2.1.263" || version == "2.1.296" || version == "2.1.303") {
 		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "claude_message_blocks"}
 		c.NativeRecap = Capability{State: "fixture_verified", Reason: "system_away_summary_content"}
 		c.LiveCollection = Capability{State: "fixture_verified", Reason: "configured_file_tail_and_restart_tests"}
 	}
 	if provider == Claude && (version == "2.1.303" || version == "2.1.296") {
 		c.NativeSubagents = Capability{State: "fixture_verified", Reason: "native_sidechain_agent_session_identity_and_child_capture"}
+		c.LiveCollection = Capability{State: "fixture_verified", Reason: "current_version_checkpoint_serialization_and_restart_tests"}
+		c.Evidence = "synthetic current-version message/away-summary/restart fixtures; October 22 metadata-only schema audit"
 	}
 	if provider == Codex && version == "0.153.4" {
 		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "codex_response_item"}
 		c.NativeRecap = Capability{State: "unsupported", Reason: "native_tui_recap_not_persisted"}
 		c.LiveCollection = Capability{State: "fixture_verified", Reason: "configured_file_tail_and_restart_tests"}
 		c.NativeForks = Capability{State: "fixture_verified", Reason: "session_meta_parent_extension; relationship_projection_unavailable"}
+	}
+	if provider == Codex && version == "0.163.0" {
+		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "codex_0163_response_item_input_text_output_text"}
+		c.NativeRecap = Capability{State: "unsupported", Reason: "native_tui_recap_not_persisted"}
+		c.LiveCollection = Capability{State: "fixture_verified", Reason: "current_version_checkpoint_serialization_and_restart_tests"}
+		c.NativeForks = Capability{State: "fixture_verified", Reason: "bounded_forked_from_id_lineage_child_scope_and_parent_relation"}
+		c.Evidence = "synthetic current-version response-item/restart and fork fixtures; October 22 metadata-only schema audit"
 	}
 	if provider == Devin {
 		c.OrdinaryContent = Capability{State: "fixture_verified", Reason: "acp_messages_table"}

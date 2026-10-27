@@ -114,14 +114,8 @@ func TestStdioLifecycleToolsAndScopedReads(t *testing.T) {
 		t.Fatalf("bad negotiation: %v", initResult)
 	}
 	listed := rows[2]["result"].(map[string]any)["tools"].([]any)
-	if len(listed) != 7 {
+	if len(listed) != 9 {
 		t.Fatalf("listed tools: %v", listed)
-	}
-	for _, item := range listed {
-		tool := item.(map[string]any)
-		if tool["name"] == "context.query" {
-			t.Fatal("ranked context query advertised")
-		}
 	}
 	status := structured(t, rows[3])
 	if strings.Contains(fmt.Sprint(status), "/secret/path") || strings.Contains(fmt.Sprint(status), "private/path") {

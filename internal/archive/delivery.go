@@ -34,37 +34,101 @@ func (s *Store) CaptureSink(destination string, r Registration) (sessioncapture.
 func (s *captureSink) Destination() string { return s.destination }
 
 func (s *captureSink) Accept(ctx context.Context, d sessioncapture.Delivery) (sessioncapture.Acknowledgement, error) {
-	if err := d.Validate(); err != nil {
+	acks, err := s.store.AcceptCaptureBatch(ctx, s.destination, []Registration{s.registration}, []sessioncapture.Delivery{d})
+	if err != nil {
 		return sessioncapture.Acknowledgement{}, err
 	}
-	if d.Source != s.registration.Source {
-		return sessioncapture.Acknowledgement{}, errors.New("delivery_source_not_registered")
+	return acks[0], nil
+}
+
+// AcceptCaptureBatch atomically accepts an ordered group of deliveries. The
+// registrations and acknowledgements align with deliveries. Every new receipt,
+// record and checkpoint commits together; an error returns no acknowledgements.
+// Exact receipt replay remains subject to current enrollment and suppression.
+// Multiple deliveries for one source must follow its checkpoint order. Groups
+// are bounded to 16 deliveries and 1 MiB of JSON; scalar acceptance retains the
+// normal delivery size limit.
+func (s *Store) AcceptCaptureBatch(ctx context.Context, destination string, registrations []Registration, deliveries []sessioncapture.Delivery) (_ []sessioncapture.Acknowledgement, finalErr error) {
+	defer func() { finalErr = capacityError(finalErr) }()
+	if destination == "" {
+		return nil, errors.New("destination_required")
 	}
-	s.store.mu.Lock()
-	defer s.store.mu.Unlock()
-	if err := s.store.captureAllowed(ctx, s.registration, d.Batch); err != nil {
-		return sessioncapture.Acknowledgement{}, err
+	if len(registrations) != len(deliveries) || len(deliveries) > 16 {
+		return nil, errors.New("invalid_capture_batch")
 	}
-	var stored string
-	err := s.store.db.QueryRowContext(ctx, "SELECT acknowledgement_json FROM capture_receipts WHERE destination=? AND batch_id=?", s.destination, d.BatchID).Scan(&stored)
-	if err == nil {
-		var ack sessioncapture.Acknowledgement
-		if json.Unmarshal([]byte(stored), &ack) != nil || ack.Validate(s.destination, d) != nil {
-			return sessioncapture.Acknowledgement{}, errors.New("corrupt_capture_receipt")
+	needed := make([]uint64, len(deliveries))
+	wireBytes := 0 // Match the spool's sum of individual JSON envelope sizes.
+	for i, d := range deliveries {
+		if err := d.Validate(); err != nil {
+			return nil, err
 		}
-		return ack, nil
+		if len(deliveries) > 1 {
+			wire, err := json.Marshal(d)
+			if err != nil {
+				return nil, err
+			}
+			wireBytes += len(wire)
+			if wireBytes > 1<<20 {
+				return nil, errors.New("capture_batch_too_large")
+			}
+		}
+		if d.Source != registrations[i].Source {
+			return nil, errors.New("delivery_source_not_registered")
+		}
+		var err error
+		needed[i], err = validateIngest(registrations[i], d.Previous, d.Batch)
+		if err != nil {
+			return nil, err
+		}
 	}
-	if err != sql.ErrNoRows {
-		return sessioncapture.Acknowledgement{}, err
+	acks := make([]sessioncapture.Acknowledgement, len(deliveries))
+	if len(deliveries) == 0 {
+		return acks, nil
 	}
-	ack := sessioncapture.Acknowledgement{
-		Version: sessioncapture.DeliveryVersion, Destination: s.destination,
-		BatchID: d.BatchID, SourceKey: d.Source.Key(), Checkpoint: d.Batch.Checkpoint,
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
 	}
-	if err := s.store.ingest(ctx, s.registration, d.Previous, d.Batch, time.Now(), &ack); err != nil {
-		return sessioncapture.Acknowledgement{}, capacityError(err)
+	defer tx.Rollback()
+	now := time.Now()
+	committedHealth := make(map[string]string, len(deliveries))
+	var totalNeeded uint64
+	for i, d := range deliveries {
+		r := registrations[i]
+		if err := captureAllowed(ctx, tx, r, d.Batch); err != nil {
+			return nil, err
+		}
+		var stored string
+		err := tx.QueryRowContext(ctx, "SELECT acknowledgement_json FROM capture_receipts WHERE destination=? AND batch_id=?", destination, d.BatchID).Scan(&stored)
+		if err == nil {
+			if json.Unmarshal([]byte(stored), &acks[i]) != nil || acks[i].Validate(destination, d) != nil {
+				return nil, errors.New("corrupt_capture_receipt")
+			}
+			continue
+		}
+		if err != sql.ErrNoRows {
+			return nil, err
+		}
+		totalNeeded += needed[i]
+		if err := s.checkIngestSpace(ctx, tx, totalNeeded); err != nil {
+			return nil, err
+		}
+		acks[i] = sessioncapture.Acknowledgement{Version: sessioncapture.DeliveryVersion, Destination: destination, BatchID: d.BatchID, SourceKey: d.Source.Key(), Checkpoint: d.Batch.Checkpoint}
+		health, err := s.ingestTx(ctx, tx, r, d.Previous, d.Batch, now, &acks[i])
+		if err != nil {
+			return nil, err
+		}
+		committedHealth[r.Key()] = health
 	}
-	return ack, nil
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	for key, health := range committedHealth {
+		s.rememberHealth(key, health, now)
+	}
+	return acks, nil
 }
 
 // CheckCapture rejects suppressed evidence before a collector persists it in a
@@ -76,19 +140,23 @@ func (s *Store) CheckCapture(ctx context.Context, r Registration, batch sessionc
 }
 
 func (s *Store) captureAllowed(ctx context.Context, r Registration, batch sessioncapture.Batch) error {
+	return captureAllowed(ctx, s.db, r, batch)
+}
+
+func captureAllowed(ctx context.Context, q rowQuerier, r Registration, batch sessioncapture.Batch) error {
 	var active int
-	if err := s.db.QueryRowContext(ctx, "SELECT active FROM stream_locators WHERE stream_key=?", r.Key()).Scan(&active); err != nil || active != 1 {
+	if err := q.QueryRowContext(ctx, "SELECT active FROM stream_locators WHERE stream_key=?", r.Key()).Scan(&active); err != nil || active != 1 {
 		return errors.New("source_not_registered")
 	}
 	conv := ""
 	if batch.Checkpoint.ConversationID != "" {
 		conv = sessionrecord.Conversation(r.Namespace, batch.Checkpoint.ConversationID)
 	}
-	if err := checkSuppression(ctx, s.db, r.Namespace, conv, ""); err != nil {
+	if err := checkSuppression(ctx, q, r.Namespace, conv, ""); err != nil {
 		return err
 	}
 	for _, item := range batch.Records {
-		if err := checkSuppression(ctx, s.db, r.Namespace, conv, item.Record.RecordKey); err != nil {
+		if err := checkSuppression(ctx, q, r.Namespace, conv, item.Record.RecordKey); err != nil {
 			return err
 		}
 	}

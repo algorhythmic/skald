@@ -12,22 +12,28 @@ import (
 
 	"github.com/algorhythmic/skald/capturespool"
 	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/observability"
 	"github.com/algorhythmic/skald/sessioncapture"
 )
 
 type Collector struct {
+	PrefixDirectory string
+	Metrics         *observability.Recorder
 	scanMu          sync.Mutex
 	sources         []archive.Registration
 	discovery       map[string]DiscoveryStatus
 	lastDiscovery   time.Time
 	discoveryCursor map[string]int
 	verified        map[string]verifiedFile
+	checkpoints     *captureCheckpointSnapshot
 	devinWal        map[string]walTick
+	acceptedPolls   map[string]capturePoll
 	Store           *archive.Store
 	Spool           *capturespool.Spool
 	Config          Config
 	mu              sync.Mutex
 	issues          map[string]string
+	heartbeatIssues map[string]string
 }
 
 func (c *Collector) Issues() map[string]string {
@@ -37,7 +43,28 @@ func (c *Collector) Issues() map[string]string {
 	for k, v := range c.issues {
 		out[k] = v
 	}
+	for key, code := range c.heartbeatIssues {
+		if out[key] == "" {
+			out[key] = code
+		}
+	}
 	return out
+}
+
+func (c *Collector) heartbeatIssue(err error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err == nil {
+		c.heartbeatIssues = nil
+		return
+	}
+	var heartbeatErr *archive.HealthHeartbeatError
+	if errors.As(err, &heartbeatErr) {
+		c.heartbeatIssues = make(map[string]string, len(heartbeatErr.Keys))
+		for _, key := range heartbeatErr.Keys {
+			c.heartbeatIssues[key] = "archive_write_failed"
+		}
+	}
 }
 func (c *Collector) issue(key, code string) {
 	c.mu.Lock()
@@ -59,16 +86,44 @@ func (c *Collector) issue(key, code string) {
 func (c *Collector) Scan(ctx context.Context) bool {
 	c.scanMu.Lock()
 	defer c.scanMu.Unlock()
+	started := time.Now()
+	c.Metrics.Add("scans", 1)
+	defer func() { c.Metrics.Duration("scan", time.Since(started)) }()
+	defer func() {
+		// Already completed observations remain valid if the scan is canceled.
+		// Give their grouped durable heartbeat a bounded chance to commit.
+		flushCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		c.Metrics.Add("health_flush_calls", 1)
+		if n, err := c.Store.FlushHealthBatch(flushCtx); err != nil {
+			c.Metrics.Add("health_flush_errors", 1)
+			c.heartbeatIssue(err)
+		} else {
+			if n > 0 {
+				c.Metrics.Add("health_heartbeat_transactions", 1)
+				c.Metrics.Add("health_heartbeat_sources", int64(n))
+			}
+			c.heartbeatIssue(nil)
+		}
+	}()
 	c.discover(ctx)
 	// Retry already captured envelopes even when the native source is offline.
 	if c.Spool != nil {
 		_, _ = c.Spool.Deliver(ctx, collectorSink{c}, 256)
 	}
+	c.loadCaptureCheckpoints(ctx)
+	defer func() { c.checkpoints = nil }()
 	more := false
+	stage := captureStage{collector: c}
+	defer func() { stage.flush(ctx) }()
 	for _, source := range c.Sources() {
+		if len(stage.candidates) > 0 && time.Since(stage.started) >= captureStageAge {
+			more = stage.flush(ctx) || more
+		}
 		if ctx.Err() != nil {
 			return false
 		}
+		c.Metrics.Add("source_checks", 1)
 		cp, err := c.captureCheckpoint(ctx, source)
 		if err != nil {
 			code := "checkpoint_read_failed"
@@ -81,7 +136,8 @@ func (c *Collector) Scan(ctx context.Context) bool {
 
 		stamp, stampErr := sourceStamp(source)
 		if cached, ok := c.verified[source.Key()]; ok && stampErr == nil && cached.Stamp == stamp && cached.Checkpoint == cp && time.Since(cached.At) < time.Minute {
-			if err := c.Store.SetHealth(ctx, source, cached.Health, time.Now()); err != nil {
+			c.Metrics.Add("file_cache_hits", 1)
+			if err := c.Store.ObserveHealth(ctx, source, cached.Health, time.Now()); err != nil {
 				c.issue(source.Key(), "archive_write_failed")
 			} else {
 				c.issue(source.Key(), cached.Issue)
@@ -121,9 +177,13 @@ func (c *Collector) Scan(ctx context.Context) bool {
 			}
 		}
 		if !batch.Pending {
-			batch, err = captureFile(ctx, source, cp)
+			c.Metrics.Add("capture_attempts", 1)
+			captureStarted := time.Now()
+			batch, err = captureFileWithPrefixState(ctx, source, cp, c.Metrics, c.PrefixDirectory)
+			c.Metrics.Duration("capture", time.Since(captureStarted))
 		}
 		if err != nil {
+			c.Metrics.Add("capture_errors", 1)
 			code := "source_unavailable"
 			if errors.Is(err, context.Canceled) {
 				return false
@@ -132,56 +192,20 @@ func (c *Collector) Scan(ctx context.Context) bool {
 				code = "source_changed_during_read"
 			}
 			c.issue(source.Key(), code)
-			_ = c.Store.SetHealth(ctx, source, "unavailable", time.Now())
+			_ = c.Store.ObserveHealth(ctx, source, "unavailable", time.Now())
 			continue
 		}
-		if err := c.acceptCapture(ctx, source, cp, batch); err != nil {
-			code := "archive_write_failed"
-			if errors.Is(err, archive.ErrCapacity) || errors.Is(err, capturespool.ErrCapacity) {
-				code = "capture_capacity_limit"
-			}
-			if err.Error() == "capture_suppressed" {
-				code = "capture_suppressed"
-			}
-			if err.Error() == "capture_delivery_pending" {
-				code = "capture_delivery_pending"
-			}
-			c.issue(source.Key(), code)
-			_ = c.Store.SetHealth(ctx, source, "blocked", time.Now())
+		candidate := captureCandidate{source: source, previous: cp, batch: batch, stamp: stamp, stampErr: stampErr}
+		if staged, flushedMore := stage.add(ctx, candidate); staged {
+			more = more || flushedMore
 			continue
 		}
-		health, issue := captureHealth(batch)
-		// A durable receipt replay need not write the sink again, but this file
-		// observation can recover availability after an intervening source loss.
-		if err := c.Store.SetHealth(ctx, source, health, time.Now()); err != nil {
-			c.issue(source.Key(), "archive_write_failed")
-			continue
+		more = stage.flush(ctx) || more
+		if c.finishCapture(ctx, candidate, c.acceptCapture(ctx, source, cp, batch)) {
+			more = more || batch.More
 		}
-		c.issue(source.Key(), issue)
-
-		consumed := batch.Checkpoint.Offset == stamp.Size
-		if source.Provider == sessioncapture.Devin {
-			// The canonical dump, not the file size, is the captured extent.
-			consumed = true
-		}
-		// Stable partial and blocked tails cannot progress until the source
-		// changes. Cache their result too, while keeping the same periodic
-		// prefix audit and per-poll identity/size/mtime/ctime checks. A hot
-		// Devin WAL still needs its activity probe and quiet-window transition.
-		cacheable := !batch.More && (consumed || batch.Pending || batch.Blocked)
-		if source.Provider == sessioncapture.Devin && batch.Pending {
-			cacheable = false
-		}
-		if cacheable && stampErr == nil {
-			if after, err := sourceStamp(source); err == nil && after == stamp {
-				if c.verified == nil {
-					c.verified = map[string]verifiedFile{}
-				}
-				c.verified[source.Key()] = verifiedFile{Stamp: stamp, Checkpoint: batch.Checkpoint, At: time.Now(), Health: health, Issue: issue}
-			}
-		}
-		more = more || batch.More
 	}
+	more = stage.flush(ctx) || more
 	return more
 }
 
@@ -204,11 +228,43 @@ func captureHealth(batch sessioncapture.Batch) (health, issue string) {
 
 // A producer checkpoint advances when the immutable envelope reaches the spool.
 // The standalone archive acknowledges independently after committing its data.
-func (c *Collector) acceptCapture(ctx context.Context, source archive.Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch) error {
+func (c *Collector) acceptCapture(ctx context.Context, source archive.Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch) (finalErr error) {
+	poll := capturePollFor(batch)
+	defer func() {
+		if finalErr != nil {
+			delete(c.acceptedPolls, source.Key())
+			return
+		}
+		if c.acceptedPolls == nil {
+			c.acceptedPolls = map[string]capturePoll{}
+		}
+		c.acceptedPolls[source.Key()] = poll
+	}()
 	delivery, err := sessioncapture.NewDelivery(source.Source, previous, batch)
 	if err != nil {
 		return err
 	}
+	if last, ok := c.acceptedPolls[source.Key()]; ok && last == poll && previous.Version != 0 && previous == batch.Checkpoint && len(batch.Records) == 0 && len(batch.Gaps) == 0 {
+		// Empty metadata envelopes can share a checkpoint while needing distinct
+		// receipts. Never skip over an envelope whose acceptance is uncertain.
+		drained := true
+		if c.Spool != nil {
+			pending, err := c.capturePending(source.Key())
+			if err != nil {
+				return err
+			}
+			drained = pending == 0
+		}
+		if drained {
+			// Redaction and enrollment may change between identical observations.
+			if err := c.Store.CheckCapture(ctx, source, batch); err != nil {
+				return err
+			}
+			c.Metrics.Add("empty_polls_skipped", 1)
+			return nil
+		}
+	}
+	c.invalidateCaptureCheckpoint(source.Key())
 	if c.Spool != nil {
 		if err := c.Store.CheckCapture(ctx, source, batch); err != nil {
 			return err
@@ -232,6 +288,23 @@ func (c *Collector) acceptCapture(ctx context.Context, source archive.Registrati
 	}
 	_, err = sessioncapture.Deliver(ctx, sink, delivery)
 	return err
+}
+
+// Only inactive WAL bookkeeping timestamps are immaterial. An active timestamp
+// refreshes durable liveness, and every pending/blocked/backfill edge is kept.
+type capturePoll struct {
+	checkpoint             sessioncapture.Checkpoint
+	pending, blocked, more bool
+	active                 bool
+	activeAt               time.Time
+}
+
+func capturePollFor(batch sessioncapture.Batch) capturePoll {
+	p := capturePoll{checkpoint: batch.Checkpoint, pending: batch.Pending, blocked: batch.Blocked, more: batch.More, active: batch.SourceActive}
+	if batch.SourceActive {
+		p.activeAt = batch.SourceActiveAt
+	}
+	return p
 }
 
 type walTick struct {
@@ -259,6 +332,21 @@ func (r cancelReader) Seek(n int64, whence int) (int64, error) {
 }
 
 func captureFile(ctx context.Context, r archive.Registration, cp sessioncapture.Checkpoint) (sessioncapture.Batch, error) {
+	return captureFileMeasured(ctx, r, cp, nil)
+}
+
+type measuredInput struct {
+	io.ReadSeeker
+	bytes int64
+}
+
+func (r *measuredInput) Read(p []byte) (int, error) {
+	n, err := r.ReadSeeker.Read(p)
+	r.bytes += int64(n)
+	return n, err
+}
+
+func captureFileMeasured(ctx context.Context, r archive.Registration, cp sessioncapture.Checkpoint, metrics *observability.Recorder) (sessioncapture.Batch, error) {
 	root, err := os.OpenRoot(r.Root)
 	if err != nil {
 		return sessioncapture.Batch{}, err
@@ -277,6 +365,7 @@ func captureFile(ctx context.Context, r archive.Registration, cp sessioncapture.
 		return sessioncapture.Batch{}, errors.New("regular_source_required")
 	}
 	var input io.ReadSeeker = cancelReader{f, ctx}
+	var snapshot []byte
 	if r.Provider == sessioncapture.Devin {
 		// The caller deferred while the WAL was hot; it is quiet now, so the
 		// canonical dump is a consistent snapshot.
@@ -284,9 +373,17 @@ func captureFile(ctx context.Context, r archive.Registration, cp sessioncapture.
 		if err != nil {
 			return sessioncapture.Batch{}, err
 		}
-		input = bytes.NewReader(dump)
+		snapshot = dump
 	}
-	batch, err := sessioncapture.Read(input, r.Source, cp, sessioncapture.DefaultLimits(), time.Now())
+	measured := &measuredInput{ReadSeeker: input}
+	defer func() { metrics.Add("capture_input_bytes", measured.bytes) }()
+	var batch sessioncapture.Batch
+	if snapshot != nil {
+		metrics.Add("capture_input_bytes", int64(len(snapshot)))
+		batch, err = sessioncapture.ReadSnapshot(snapshot, r.Source, cp, sessioncapture.DefaultLimits(), time.Now())
+	} else {
+		batch, err = sessioncapture.Read(measured, r.Source, cp, sessioncapture.DefaultLimits(), time.Now())
+	}
 	if err != nil {
 		return sessioncapture.Batch{}, err
 	}

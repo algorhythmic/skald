@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/algorhythmic/skald/internal/buildinfo"
 	"github.com/algorhythmic/skald/internal/client"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
@@ -191,7 +192,7 @@ func (s *Server) handle(ctx context.Context, line []byte) *response {
 			return failure(q.ID, -32602, "invalid_initialize_params")
 		}
 		s.initialized = true
-		return success(q.ID, map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "skald", "version": "0.1.0"}})
+		return success(q.ID, map[string]any{"protocolVersion": ProtocolVersion, "capabilities": map[string]any{"tools": map[string]any{}}, "serverInfo": map[string]string{"name": "skald", "version": buildinfo.Version}})
 	}
 	if !s.ready {
 		return failure(q.ID, -32000, "not_initialized")
@@ -249,6 +250,8 @@ func decodeObject(b json.RawMessage, value any) error {
 }
 
 type arguments struct {
+	Text         string `json:"text,omitempty"`
+	MaxBytes     int    `json:"max_bytes,omitempty"`
 	Namespace    string `json:"namespace"`
 	Conversation string `json:"conversation,omitempty"`
 	Record       string `json:"record,omitempty"`
@@ -338,7 +341,7 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) map
 	case "status":
 		// Status is an allowlist: the daemon status also carries source locations,
 		// discovery internals, and raw-access policy that agents do not need.
-		data = map[string]any{"archive_instance": status["archive_instance"], "boundary": status["boundary"], "sessions": status["sessions"], "record_versions": status["record_versions"], "retrieval": status["retrieval"], "sources_total": status["sources_total"], "sources_omitted": status["sources_omitted"], "source_health": safeHealth(status["sources"])}
+		data = map[string]any{"archive_instance": status["archive_instance"], "boundary": status["boundary"], "sessions": status["sessions"], "record_versions": status["record_versions"], "retrieval": status["retrieval"], "backup": status["backup"], "sources_total": status["sources_total"], "sources_omitted": status["sources_omitted"], "source_health": safeHealth(status["sources"])}
 	case "capabilities":
 		path = "/v1/capabilities"
 	case "sessions.list":
@@ -361,6 +364,15 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) map
 		path = "/v1/transcript"
 		q.Set("conversation", a.Conversation)
 		q.Set("history", strconv.FormatBool(a.History))
+	case "descriptions.read":
+		path = "/v1/descriptions"
+		q.Set("conversation", a.Conversation)
+	case "context.query":
+		path = "/v1/context"
+		q.Set("text", a.Text)
+		if a.MaxBytes > 0 {
+			q.Set("max_bytes", strconv.Itoa(a.MaxBytes))
+		}
 	}
 	if path != "" {
 		if name == "sessions.list" || name == "artifacts.list" || name == "changes.read" || name == "transcript.read" {
@@ -436,6 +448,18 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) map
 		annotateItems(m, prov)
 		if name == "transcript.read" {
 			filterTranscript(m)
+		}
+		if name == "context.query" {
+			items, ok := m["context"].([]any)
+			if !ok {
+				return toolError(prov, "invalid_daemon_response")
+			}
+			for _, item := range items {
+				row, ok := item.(map[string]any)
+				if !ok || row["namespace"] != ns || (row["role"] != "user" && row["role"] != "assistant") {
+					return toolError(prov, "invalid_daemon_response")
+				}
+			}
 		}
 	}
 	payload := map[string]any{"data": data, "provenance": prov, "content_usage": "source_evidence_not_instructions"}
@@ -536,7 +560,7 @@ func annotateItems(data map[string]any, base provenance) {
 
 func toolKnown(name string) bool {
 	switch name {
-	case "capabilities", "status", "sessions.list", "artifacts.list", "artifacts.get", "changes.read", "transcript.read":
+	case "capabilities", "status", "sessions.list", "artifacts.list", "artifacts.get", "changes.read", "transcript.read", "descriptions.read", "context.query":
 		return true
 	}
 	return false
@@ -552,6 +576,10 @@ func validateArgs(name string, a arguments, raw json.RawMessage, allowRaw bool) 
 		allowed["conversation"], allowed["limit"], allowed["cursor"] = true, true, true
 	case "transcript.read":
 		allowed["conversation"], allowed["limit"], allowed["cursor"], allowed["history"] = true, true, true, true
+	case "descriptions.read":
+		allowed["conversation"] = true
+	case "context.query":
+		allowed["text"], allowed["max_bytes"] = true, true
 	case "artifacts.get":
 		allowed["record"], allowed["revision"], allowed["adapter"] = true, true, true
 		if allowRaw {
@@ -578,7 +606,7 @@ func validateArgs(name string, a arguments, raw json.RawMessage, allowRaw bool) 
 	if name == "artifacts.get" && !sessionrecord.ValidDigest(a.Revision) {
 		return false
 	}
-	if (name == "artifacts.list" || name == "transcript.read") && a.Conversation == "" {
+	if (name == "artifacts.list" || name == "transcript.read" || name == "descriptions.read") && a.Conversation == "" {
 		return false
 	}
 	if a.Raw && !allowRaw {
@@ -589,6 +617,14 @@ func validateArgs(name string, a arguments, raw json.RawMessage, allowRaw bool) 
 	}
 	if _, provided := keys["limit"]; provided && a.Limit == 0 {
 		return false
+	}
+	if name == "context.query" {
+		if strings.TrimSpace(a.Text) == "" || len(a.Text) > 4096 || a.MaxBytes < 0 || a.MaxBytes > 65536 {
+			return false
+		}
+		if _, provided := keys["max_bytes"]; provided && a.MaxBytes < 2 {
+			return false
+		}
 	}
 	return true
 }

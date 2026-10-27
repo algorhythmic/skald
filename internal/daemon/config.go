@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/maintenance"
+	"github.com/algorhythmic/skald/internal/observability"
+	"github.com/algorhythmic/skald/internal/retrieval"
 )
 
 type DiscoveryRoot struct {
@@ -24,13 +27,16 @@ type DiscoveryRoot struct {
 	IncludeSubagents bool      `json:"include_subagents,omitempty"`
 }
 type Config struct {
-	Discovery        []DiscoveryRoot        `json:"discovery,omitempty"`
-	Version          int                    `json:"version"`
-	PollMilliseconds int                    `json:"poll_interval_ms"`
-	MaxDatabaseBytes int64                  `json:"max_database_bytes"`
-	MinFreeBytes     uint64                 `json:"min_free_bytes"`
-	AllowRaw         bool                   `json:"allow_raw"`
-	Sources          []archive.Registration `json:"sources"`
+	Backup           maintenance.BackupConfig `json:"backup,omitempty"`
+	Retrieval        retrieval.Config         `json:"retrieval,omitempty"`
+	Telemetry        observability.Config     `json:"telemetry,omitempty"`
+	Discovery        []DiscoveryRoot          `json:"discovery,omitempty"`
+	Version          int                      `json:"version"`
+	PollMilliseconds int                      `json:"poll_interval_ms"`
+	MaxDatabaseBytes int64                    `json:"max_database_bytes"`
+	MinFreeBytes     uint64                   `json:"min_free_bytes"`
+	AllowRaw         bool                     `json:"allow_raw"`
+	Sources          []archive.Registration   `json:"sources"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -55,7 +61,7 @@ func LoadConfig(path string) (Config, error) {
 	if err := d.Decode(new(any)); err != io.EOF {
 		return cfg, errors.New("trailing_configuration_data")
 	}
-	if cfg.Version != 1 || cfg.PollMilliseconds < 100 || cfg.PollMilliseconds > 60000 || cfg.MaxDatabaseBytes < 1<<20 || cfg.MaxDatabaseBytes > 1<<50 || cfg.MinFreeBytes > 1<<50 || len(cfg.Sources) > 256 || len(cfg.Discovery) > 16 {
+	if cfg.Version != 1 || cfg.PollMilliseconds < 100 || cfg.PollMilliseconds > 60000 || cfg.MaxDatabaseBytes < 1<<20 || cfg.MaxDatabaseBytes > 1<<50 || cfg.MinFreeBytes > 1<<50 || len(cfg.Sources) > archive.MaxEnrolledSources || len(cfg.Discovery) > 16 {
 		return cfg, errors.New("invalid_configuration_limits")
 	}
 	base, err := filepath.Abs(filepath.Dir(path))
@@ -94,7 +100,7 @@ func LoadConfig(path string) (Config, error) {
 		if r.IncludeSubagents && r.Provider != sessioncapture.Claude {
 			return cfg, errors.New("subagent_discovery_requires_claude")
 		}
-		if r.Namespace == "" || len(r.Namespace) > 256 || r.Root == "" || r.MaxSessions < 1 || r.MaxSessions > 256 || len(r.RootAliases) > 16 || (r.Provider != sessioncapture.Claude && r.Provider != sessioncapture.Codex && r.Provider != sessioncapture.Devin) {
+		if r.Namespace == "" || len(r.Namespace) > 256 || r.Root == "" || r.MaxSessions < 1 || r.MaxSessions > archive.MaxEnrolledSources || len(r.RootAliases) > 16 || (r.Provider != sessioncapture.Claude && r.Provider != sessioncapture.Codex && r.Provider != sessioncapture.Devin) {
 			return cfg, errors.New("invalid_discovery_configuration")
 		}
 		if namespaces[r.Namespace] {
@@ -112,11 +118,40 @@ func LoadConfig(path string) (Config, error) {
 		}
 		count += r.MaxSessions
 	}
-	if count > 256 {
+	if count > archive.MaxEnrolledSources {
 		return cfg, errors.New("configured_source_capacity_exceeded")
+	}
+	if err := cfg.Telemetry.Validate(); err != nil {
+		return cfg, err
+	}
+	if cfg.Retrieval.Executable != "" {
+		cfg.Retrieval.Executable = resolve(base, cfg.Retrieval.Executable)
+		if cfg.Retrieval.Directory != "" {
+			cfg.Retrieval.Directory = resolve(base, cfg.Retrieval.Directory)
+		}
+	}
+	if cfg.Backup.Destination != "" {
+		cfg.Backup.Destination = resolve(base, cfg.Backup.Destination)
+	} else if cfg.Backup.OffDevice {
+		return cfg, errors.New("backup_destination_required")
 	}
 
 	return cfg, nil
+}
+
+func DefaultCacheDir() (string, error) {
+	base := os.Getenv("XDG_CACHE_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		base = filepath.Join(home, ".cache")
+	}
+	if !filepath.IsAbs(base) {
+		return "", errors.New("absolute_XDG_CACHE_HOME_required")
+	}
+	return filepath.Join(base, "skald"), nil
 }
 func resolve(base, path string) string {
 	if !filepath.IsAbs(path) {

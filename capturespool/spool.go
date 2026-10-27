@@ -366,9 +366,21 @@ func (s *Spool) BindDestination(destination, instance string) error {
 // Enqueue commits the complete envelope and producer checkpoint in one durable
 // transaction. A known identical batch ID is an idempotent no-op, even after
 // the envelope itself was pruned following all receipts.
+const MaxBatchDeliveries = 16
+const MaxBatchBytes = 1 << 20
+
 func (s *Spool) Enqueue(d sessioncapture.Delivery, destinations []string) error {
-	if err := d.Validate(); err != nil {
-		return err
+	return s.enqueueBatch(context.Background(), []sessioncapture.Delivery{d}, destinations, false)
+}
+
+// EnqueueBatch atomically commits bounded immutable envelopes and all producer
+// positions under FULL synchronization. A failure advances none of the sources.
+func (s *Spool) EnqueueBatch(ctx context.Context, deliveries []sessioncapture.Delivery, destinations []string) error {
+	return s.enqueueBatch(ctx, deliveries, destinations, true)
+}
+func (s *Spool) enqueueBatch(ctx context.Context, deliveries []sessioncapture.Delivery, destinations []string, bounded bool) error {
+	if len(deliveries) == 0 || len(deliveries) > MaxBatchDeliveries {
+		return errors.New("invalid_capture_spool_batch_size")
 	}
 	_, wireRegistry, err := registry(destinations)
 	if err != nil {
@@ -378,20 +390,44 @@ func (s *Spool) Enqueue(d sessioncapture.Delivery, destinations []string) error 
 	if wireRegistry != string(configured) {
 		return ErrRegistry
 	}
-	wire, err := json.Marshal(d)
-	if err != nil {
-		return err
+	wires := make([][]byte, len(deliveries))
+	total := 0
+	for i, d := range deliveries {
+		if err := d.Validate(); err != nil {
+			return err
+		}
+		wire, err := json.Marshal(d)
+		if err != nil {
+			return err
+		}
+		wires[i] = wire
+		total += len(wire)
+		if bounded && total > MaxBatchBytes {
+			return errors.New("capture_spool_batch_too_large")
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return ErrClosed
 	}
-	tx, err := s.db.BeginTx(context.Background(), nil)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	for i, d := range deliveries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := s.enqueueTx(tx, d, wires[i]); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+func (s *Spool) enqueueTx(tx *sql.Tx, d sessioncapture.Delivery, wire []byte) error {
+	var err error
 	var retained []byte
 	err = tx.QueryRow("SELECT envelope_digest FROM batch_ids WHERE batch_id=?", d.BatchID).Scan(&retained)
 	if err == nil {
@@ -399,7 +435,7 @@ func (s *Spool) Enqueue(d sessioncapture.Delivery, destinations []string) error 
 		if !bytes.Equal(retained, digest[:]) {
 			return ErrDuplicate
 		}
-		return tx.Commit()
+		return nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return err
@@ -440,7 +476,7 @@ func (s *Spool) Enqueue(d sessioncapture.Delivery, destinations []string) error 
 	if _, err := tx.Exec("INSERT INTO source_progress(source_key,checkpoint) VALUES (?,?) ON CONFLICT(source_key) DO UPDATE SET checkpoint=excluded.checkpoint", d.Source.Key(), checkpointWire); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 // Checkpoint is the durable producer capture position, independent of sink
@@ -578,6 +614,13 @@ func (s *Spool) Acknowledged(batchID, destination string) (bool, error) {
 // Deliver attempts at most maxBatches envelopes for the sink. A failure leaves
 // its receipt pending and permits unrelated sources to proceed in this call.
 // A source's next envelope remains blocked until its prior receipt commits.
+// BatchSink optionally accepts an atomic bounded group. An error or malformed
+// acknowledgement causes individual retries; sinks must retain exact receipts.
+type BatchSink interface {
+	sessioncapture.Sink
+	AcceptBatch(context.Context, []sessioncapture.Delivery) ([]sessioncapture.Acknowledgement, error)
+}
+
 func (s *Spool) Deliver(ctx context.Context, sink sessioncapture.Sink, maxBatches int) (int, error) {
 	if maxBatches <= 0 {
 		return 0, nil
@@ -588,30 +631,62 @@ func (s *Spool) Deliver(ctx context.Context, sink sessioncapture.Sink, maxBatche
 	}
 	s.drainMu.Lock()
 	defer s.drainMu.Unlock()
-	failed := make(map[string]bool)
+	failed := map[string]bool{}
 	succeeded := 0
+	attempts := 0
 	var failures []error
-	for attempts := 0; attempts < maxBatches; attempts++ {
+	for attempts < maxBatches {
 		if err := ctx.Err(); err != nil {
 			return succeeded, errors.Join(append(failures, err)...)
 		}
-		seq, d, ok, err := s.next(destination, failed)
+		group, err := s.nextGroup(ctx, destination, failed, min(MaxBatchDeliveries, maxBatches-attempts))
 		if err != nil {
 			return succeeded, errors.Join(append(failures, err)...)
 		}
-		if !ok {
+		if len(group) == 0 {
 			break
 		}
-		ack, err := sessioncapture.Deliver(ctx, sink, d)
-		if err != nil {
-			failed[d.Source.Key()] = true
-			failures = append(failures, fmt.Errorf("%s %s: %w", destination, d.BatchID, err))
-			continue
+		attempts += len(group)
+		accepted := []acceptedDelivery{}
+		grouped := false
+		if batchSink, ok := sink.(BatchSink); ok && len(group) > 1 {
+			deliveries := make([]sessioncapture.Delivery, len(group))
+			for i, item := range group {
+				deliveries[i] = item.delivery
+			}
+			acks, batchErr := batchSink.AcceptBatch(ctx, deliveries)
+			if batchErr == nil && len(acks) == len(group) {
+				grouped = true
+				for i, ack := range acks {
+					if ack.Validate(destination, group[i].delivery) != nil {
+						grouped = false
+						break
+					}
+				}
+				if grouped {
+					for i, item := range group {
+						accepted = append(accepted, acceptedDelivery{queuedDelivery: item, ack: acks[i]})
+					}
+				}
+			}
 		}
-		if err := s.commitReceipt(seq, destination, d, ack); err != nil {
-			return succeeded, errors.Join(append(failures, err)...)
+		if !grouped {
+			for _, item := range group {
+				ack, err := sessioncapture.Deliver(ctx, sink, item.delivery)
+				if err != nil {
+					failed[item.delivery.Source.Key()] = true
+					failures = append(failures, fmt.Errorf("%s %s: %w", destination, item.delivery.BatchID, err))
+					continue
+				}
+				accepted = append(accepted, acceptedDelivery{queuedDelivery: item, ack: ack})
+			}
 		}
-		succeeded++
+		if len(accepted) > 0 {
+			if err := s.commitReceipts(ctx, destination, accepted); err != nil {
+				return succeeded, errors.Join(append(failures, err)...)
+			}
+			succeeded += len(accepted)
+		}
 	}
 	return succeeded, errors.Join(failures...)
 }
@@ -621,57 +696,89 @@ func (s *Spool) hasDestination(destination string) bool {
 	return destination != "" && i < len(s.destinations) && s.destinations[i] == destination
 }
 
-func (s *Spool) next(destination string, failed map[string]bool) (int64, sessioncapture.Delivery, bool, error) {
+func (s *Spool) nextGroup(ctx context.Context, destination string, failed map[string]bool, limit int) ([]queuedDelivery, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
-		return 0, sessioncapture.Delivery{}, false, ErrClosed
+		return nil, ErrClosed
 	}
-	rows, err := s.db.Query(`SELECT d.seq,d.source_key,d.envelope FROM deliveries d
+	rows, err := s.db.QueryContext(ctx, `SELECT d.seq,d.source_key,d.envelope FROM deliveries d
 WHERE NOT EXISTS(SELECT 1 FROM receipts r WHERE r.seq=d.seq AND r.destination=?)
 AND NOT EXISTS(SELECT 1 FROM deliveries earlier WHERE earlier.source_key=d.source_key AND earlier.seq<d.seq AND NOT EXISTS(SELECT 1 FROM receipts prior WHERE prior.seq=earlier.seq AND prior.destination=?))
 ORDER BY d.seq`, destination, destination)
 	if err != nil {
-		return 0, sessioncapture.Delivery{}, false, err
+		return nil, err
 	}
 	defer rows.Close()
+	group := []queuedDelivery{}
+	total := 0
 	for rows.Next() {
 		var seq int64
 		var key string
 		var wire []byte
 		if err := rows.Scan(&seq, &key, &wire); err != nil {
-			return 0, sessioncapture.Delivery{}, false, err
+			return nil, err
 		}
 		if failed[key] {
 			continue
 		}
 		d, err := sessioncapture.DecodeDelivery(wire)
 		if err != nil || d.Source.Key() != key {
-			return 0, sessioncapture.Delivery{}, false, ErrCorrupt
+			return nil, ErrCorrupt
 		}
-		return seq, d, true, nil
+		if len(group) > 0 && total+len(wire) > MaxBatchBytes {
+			break
+		}
+		group = append(group, queuedDelivery{seq: seq, delivery: d, bytes: len(wire)})
+		total += len(wire)
+		if len(group) >= limit || total >= MaxBatchBytes {
+			break
+		}
 	}
-	return 0, sessioncapture.Delivery{}, false, rows.Err()
+	return group, rows.Err()
+}
+
+type queuedDelivery struct {
+	seq      int64
+	delivery sessioncapture.Delivery
+	bytes    int
+}
+type acceptedDelivery struct {
+	queuedDelivery
+	ack sessioncapture.Acknowledgement
 }
 
 func (s *Spool) commitReceipt(seq int64, destination string, d sessioncapture.Delivery, ack sessioncapture.Acknowledgement) error {
-	if err := ack.Validate(destination, d); err != nil {
-		return err
-	}
-	wire, err := json.Marshal(ack)
-	if err != nil {
-		return err
+	return s.commitReceipts(context.Background(), destination, []acceptedDelivery{{queuedDelivery: queuedDelivery{seq: seq, delivery: d}, ack: ack}})
+}
+func (s *Spool) commitReceipts(ctx context.Context, destination string, accepted []acceptedDelivery) error {
+	for _, item := range accepted {
+		if err := item.ack.Validate(destination, item.delivery); err != nil {
+			return err
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return ErrClosed
 	}
-	tx, err := s.db.BeginTx(context.Background(), nil)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	for _, item := range accepted {
+		if err := s.commitReceiptTx(tx, item.seq, destination, item.delivery, item.ack); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+func (s *Spool) commitReceiptTx(tx *sql.Tx, seq int64, destination string, d sessioncapture.Delivery, ack sessioncapture.Acknowledgement) error {
+	wire, err := json.Marshal(ack)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.Exec("INSERT INTO receipts(seq,destination,receipt) VALUES (?,?,?)", seq, destination, wire); err != nil {
 		return err
 	}
@@ -691,7 +798,7 @@ func (s *Spool) commitReceipt(seq int64, destination string, d sessioncapture.De
 			return err
 		}
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Spool) Status() (Status, error) {

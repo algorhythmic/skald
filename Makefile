@@ -5,7 +5,7 @@ export GOCACHE ?= $(CURDIR)/.cache/go-build
 export GOMODCACHE ?= $(CURDIR)/.cache/go-mod
 BUILD_FLAGS ?= -buildvcs=false
 
-.PHONY: check-go test check build smoke tui-smoke discovery-smoke mcp-smoke demo
+.PHONY: check-go test check build smoke tui-smoke discovery-smoke mcp-smoke diagnostics-smoke completion-smoke demo
 
 check-go:
 	@command -v "$(GO)" >/dev/null 2>&1 || { \
@@ -38,3 +38,9 @@ discovery-smoke: build
 
 mcp-smoke: build
 	python3 scripts/mcp_smoke.py
+
+diagnostics-smoke: build
+	python3 scripts/diagnostics_smoke.py
+
+completion-smoke: build
+	python3 scripts/completion_smoke.py
