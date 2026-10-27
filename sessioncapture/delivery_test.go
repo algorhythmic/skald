@@ -223,8 +223,11 @@ func TestDeliveryAcknowledgementIsPerDestination(t *testing.T) {
 }
 
 func deliverySchema(t *testing.T, acknowledgement bool) *jsonschema.Resolved {
+	return deliverySchemaPath(t, acknowledgement, "../schemas/capture-delivery-v1.schema.json")
+}
+func deliverySchemaPath(t *testing.T, acknowledgement bool, path string) *jsonschema.Resolved {
 	t.Helper()
-	data, err := os.ReadFile("../schemas/capture-delivery-v1.schema.json")
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}

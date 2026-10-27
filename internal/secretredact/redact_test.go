@@ -138,3 +138,9 @@ func TestRealPasswordAssignments(t *testing.T) {
 		}
 	}
 }
+func TestTypedRealAssignment(t *testing.T) {
+	input := `password: str = "` + strings.Repeat("Q", 18) + `"`
+	if Text(input, nil) == input {
+		t.Fatal("typed real assignment missed")
+	}
+}

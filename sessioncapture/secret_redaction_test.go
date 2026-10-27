@@ -27,9 +27,34 @@ func TestSensitiveCaptureAdvancesSanitizedCheckpoint(t *testing.T) {
 				t.Fatal("invalid sanitized replay")
 			}
 			wire, _ := json.Marshal(d)
+			var instance any
+			_ = json.Unmarshal(wire, &instance)
+			if e := deliverySchemaPath(t, false, "../schemas/capture-delivery-v2.schema.json").Validate(instance); e != nil {
+				t.Fatal("v2 schema validation failed")
+			}
 			if _, e = sessioncapture.DecodeDelivery(wire); e != nil {
 				t.Fatal("sanitized transport rejected")
 			}
 		})
+	}
+}
+func TestSanitizedAppendAndMetadataTamper(t *testing.T) {
+	s := source(sessioncapture.Claude)
+	s.ConversationID = "synthetic"
+	raw, _ := json.Marshal(map[string]any{"type": "unknown", "sessionId": "synthetic", "password": "real" + "-synthetic-value"})
+	raw = append(raw, '\n')
+	first, e := sessioncapture.Read(bytes.NewReader(raw), s, sessioncapture.Checkpoint{}, sessioncapture.DefaultLimits(), clock)
+	if e != nil {
+		t.Fatal("initial capture")
+	}
+	tail := []byte(`{"type":"unknown","sessionId":"synthetic"}` + "\n")
+	input := append(append([]byte{}, raw...), tail...)
+	next, e := sessioncapture.Read(bytes.NewReader(input), s, first.Checkpoint, sessioncapture.DefaultLimits(), clock)
+	if e != nil || next.Checkpoint.Offset != int64(len(input)) || len(next.Records) != 1 {
+		t.Fatal("sanitized append continuity failed")
+	}
+	first.Records[0].Redaction.NativeBytes++
+	if _, e = sessioncapture.NewDelivery(s, sessioncapture.Checkpoint{}, first); e == nil {
+		t.Fatal("metadata tamper accepted")
 	}
 }

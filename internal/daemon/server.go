@@ -167,7 +167,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respond(w, map[string]any{
-			"contracts":      map[string]int{"sessionrecord": 1, "capture_delivery": sessioncapture.DeliveryVersion, "archive_feed": archivefeed.Version, "redaction_receipt": 1},
+			"contracts":      map[string]int{"sessionrecord": 1, "capture_delivery": sessioncapture.SanitizedDeliveryVersion, "archive_feed": archivefeed.Version, "redaction_receipt": 1},
 			"archive_schema": archive.SchemaVersion, "archive_instance": status["archive_instance"], "namespaces": ns,
 			"features":    []string{"exact_revision_reads", "archive_snapshot_and_tail", "durable_capture_spool", "independent_destination_receipts", "logical_content_removal", "scoped_read_only_mcp", "opt_in_claude_subagents", "archive_wide_descriptions", "opt_in_pinned_braid_retrieval", "compressed_payloads"},
 			"unsupported": []string{"remote_destination_transport", "odin_consumer", "physical_media_erasure"},

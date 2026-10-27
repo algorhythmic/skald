@@ -32,8 +32,9 @@ require a separate invalidation plan.
 
 ## Remaining coverage / historical scrub
 
-Byte-preserving SQLite backups, compressed backup exports and legacy startup SQL
-reprojections are separate coverage work. Until completed, this branch must not be
+Legacy title/project reprojections sanitize values before newly writing labels;
+existing derived rows are not rewritten. Byte-preserving SQLite backups and
+compressed backup exports remain separate coverage work. Until completed, this branch must not be
 presented as fully protecting every export/derived write or deployed as finished.
 
 Prefer a sanitized replacement archive generation over mutating bytes under old

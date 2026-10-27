@@ -613,7 +613,7 @@ func continuationTitle(ctx context.Context, tx *sql.Tx, conv, namespace, parentI
 	if err != nil {
 		return err
 	}
-	label := []rune("Continuation of " + title)
+	label := []rune("Continuation of " + secretredact.Text(title, nil))
 	if len(label) > 240 {
 		label = label[:240]
 	}
@@ -640,7 +640,7 @@ func commonProjectDir(ctx context.Context, tx *sql.Tx, conv, dir string, rec ses
 	if root == "" || n >= 8 {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, root, rec.RecordKey, rec.SourceRevision)
+	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, secretredact.Text(root, nil), rec.RecordKey, rec.SourceRevision)
 	return err
 }
 
@@ -666,7 +666,7 @@ func derivedTitle(rec sessionrecord.Record) (string, bool) {
 	if rec.Kind != "message" || rec.Role == nil || *rec.Role != "user" {
 		return "", false
 	}
-	text := strings.TrimSpace(rec.Body.Text)
+	text := strings.TrimSpace(secretredact.Text(rec.Body.Text, nil))
 	if strings.HasPrefix(text, "The following is the Codex agent history") {
 		// Approval-assessment rollouts wrap the assessed work in an APPROVAL
 		// REQUEST block whose "justification" describes it in natural language.
@@ -748,7 +748,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			AiTitle string `json:"aiTitle"`
 			Title   string `json:"title"`
 		}
-		if json.Unmarshal(raw, &line) != nil {
+		if json.Unmarshal(secretredact.JSON(raw, nil), &line) != nil {
 			continue
 		}
 		title := line.AiTitle
@@ -814,7 +814,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			p = &pick{streams: map[string]bool{}}
 			derived[conv] = p
 		}
-		rec, err := sessionrecord.Decode([]byte(envelope))
+		rec, err := sessionrecord.Decode(secretredact.JSON([]byte(envelope), nil))
 		if err != nil {
 			continue
 		}
@@ -868,7 +868,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			rows.Close()
 			return err
 		}
-		label := []rune("Continuation of " + title)
+		label := []rune("Continuation of " + secretredact.Text(title, nil))
 		if len(label) > 240 {
 			label = label[:240]
 		}
@@ -938,7 +938,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 	rows.Close()
 	for conv, set := range projects {
 		for root, p := range set {
-			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, root, p.key, p.revision); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, secretredact.Text(root, nil), p.key, p.revision); err != nil {
 				return err
 			}
 		}
@@ -994,7 +994,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 				sig = s
 			}
 		} else if kind == "tool_call" || kind == "message" || kind == "native_recap" {
-			if rec, err := sessionrecord.Decode([]byte(envelope)); err == nil {
+			if rec, err := sessionrecord.Decode(secretredact.JSON([]byte(envelope), nil)); err == nil {
 				sig = activitySignal(rec)
 			}
 		}

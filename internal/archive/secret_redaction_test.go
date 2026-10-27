@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/algorhythmic/skald/internal/testsupport"
 	"github.com/algorhythmic/skald/sessioncapture"
+	"strings"
 	"testing"
 )
 
@@ -88,5 +89,44 @@ func TestEveryPatternStoredAdvancedExportedAndReplayed(t *testing.T) {
 				t.Fatal("transport replay invalid")
 			}
 		})
+	}
+}
+func TestLegacyDerivedTitleSanitizedBeforeClipping(t *testing.T) {
+	s, r, raw := testStore(t)
+	batch := testBatch(t, raw, r, sessioncapture.Checkpoint{})
+	mustIngest(t, s, r, sessioncapture.Checkpoint{}, batch)
+	var target sessioncapture.Captured
+	for _, item := range batch.Records {
+		if item.Record.Kind == "message" && item.Record.Role != nil && *item.Record.Role == "user" {
+			target = item
+			break
+		}
+	}
+	if target.Record.RecordKey == "" {
+		t.Fatal("fixture missing user")
+	}
+	rec := target.Record
+	value := strings.Repeat("Q", 18)
+	rec.Body.Text = "password=" + value
+	_, e := s.db.Exec(`UPDATE normalization_storage SET envelope_json=?,compressed_envelope=NULL,decoded_length=-1 WHERE record_key=?`, encode(rec), rec.RecordKey)
+	if e != nil {
+		t.Fatal("fixture setup")
+	}
+	if _, e = s.db.Exec(`DELETE FROM session_titles`); e != nil {
+		t.Fatal("fixture setup")
+	}
+	if e = s.reprojectTitles(context.Background()); e != nil {
+		t.Fatal("reprojection failed")
+	}
+	rows, e := s.db.Query(`SELECT title FROM session_titles`)
+	if e != nil {
+		t.Fatal("title query")
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var title string
+		if rows.Scan(&title) != nil || strings.Contains(title, value) {
+			t.Fatal("legacy title leaked")
+		}
 	}
 }

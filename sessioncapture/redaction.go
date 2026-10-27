@@ -57,7 +57,13 @@ func (c Captured) Verify() error {
 
 // Sanitize is copy-on-write and idempotent. Detector errors return a constant
 // error; positive matches always produce a stored record and native boundaries.
-func Sanitize(c Captured) (Captured, error) {
+func Sanitize(c Captured) (result Captured, failure error) {
+	defer func() {
+		if recover() != nil {
+			result = Captured{}
+			failure = secretredact.ErrSensitive
+		}
+	}()
 	if err := c.Verify(); err != nil {
 		return Captured{}, err
 	}
@@ -103,7 +109,7 @@ func Sanitize(c Captured) (Captured, error) {
 		rec.Extensions = map[string]json.RawMessage{}
 	}
 	rec.Extensions[redactionExtension], _ = json.Marshal(meta)
-	result := Captured{Record: rec, Raw: raw, Redaction: meta}
+	result = Captured{Record: rec, Raw: raw, Redaction: meta}
 	if secretredact.Check(raw) != nil {
 		return Captured{}, secretredact.ErrSensitive
 	}
