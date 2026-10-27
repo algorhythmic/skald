@@ -12,8 +12,10 @@ archive or spool writes. HTTP, MCP and CLI replies containing detected secrets
 are withheld. This is intentionally a transitional **fail-closed** implementation:
 a sensitive source can block further capture, and an existing sensitive record
 can block a requested reply. It does not yet substitute sanitized capture bytes.
-Do not deploy it as the completed redaction feature. Backups and internal search
-cache materialization are not yet protected by these gates.
+Do not deploy it as the completed redaction feature. Byte-preserving backups are not yet protected by these gates. Exact archive
+reads and retrieval snapshot construction reject sensitive envelopes before
+clipping or materializing Braid caches. TUI text has a replacement filter. Existing
+Braid cache files still require explicit invalidation.
 
 Capture map: Claude (including subagents), Codex (including forks), and Devin
 snapshots converge through `sessioncapture.Read`/`ReadSnapshot` and normalization.

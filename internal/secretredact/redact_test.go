@@ -86,3 +86,23 @@ func BenchmarkCheckLargeCapture(b *testing.B) {
 		}
 	}
 }
+func TestEnvironmentAndEmbeddedJSON(t *testing.T) {
+	for _, input := range []string{`OPENAI_API_KEY=synthetic`, `{"password":"synthetic"}`, `WEBPASSWORD=synthetic`, `password=[REDACTED:not-a-policy-id]`} {
+		if Text(input, nil) == input {
+			t.Fatal("labeled credential missed")
+		}
+	}
+}
+func TestJSONReplacementDuplicateSensitiveKey(t *testing.T) {
+	input := []byte(`{"password":"synthetic","password":""}`)
+	out := JSON(input, nil)
+	if Check(out) != nil || string(out) == string(input) {
+		t.Fatal("duplicate sensitive field not handled")
+	}
+}
+func TestFineGrainedGitHubPrefilter(t *testing.T) {
+	s := "github" + "_pat_" + strings.Repeat("D", 40)
+	if Text(s, nil) == s {
+		t.Fatal("prefilter missed token")
+	}
+}

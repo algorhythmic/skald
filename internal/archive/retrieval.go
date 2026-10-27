@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
 
@@ -105,6 +106,9 @@ func (s *Store) RetrievalSnapshot(ctx context.Context, ns []string, generation i
 			}
 		} else {
 			envelope = []byte(raw)
+		}
+		if secretredact.Check(envelope) != nil {
+			return RetrievalSnapshot{}, secretredact.ErrSensitive
 		}
 		rec, err := sessionrecord.Decode(envelope)
 		if err != nil {

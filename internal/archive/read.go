@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
@@ -336,6 +337,9 @@ func (s *Store) get(ctx context.Context, ns []string, key, revision, adapter str
 	}
 	if err := rec.VerifyRaw(original); err != nil {
 		return out, err
+	}
+	if secretredact.Check(original) != nil || secretredact.Check([]byte(envelope)) != nil {
+		return Exact{}, secretredact.ErrSensitive
 	}
 	out.Record = rec
 	if raw {

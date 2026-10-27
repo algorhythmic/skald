@@ -24,10 +24,10 @@ var rules = []rule{
 	{"provider_key", regexp.MustCompile(`\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b`), 0},
 	{"aws_access_key", regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), 0},
 	{"bearer_token", regexp.MustCompile(`(?i)\bbearer[ \t]+([A-Za-z0-9._~+/=-]{8,})`), 1},
-	{"password_assignment", regexp.MustCompile(`(?i)\b(?:password|passwd|pwd|api[_-]?key|access[_-]?token|client[_-]?secret|secret[_-]?key|pihole[_-]?(?:password|webpassword))[ \t]*[=:][ \t]*("[^"\r\n]+"|'[^'\r\n]+'|[^\s"'\\,;}\]]+)`), 1},
+	{"password_assignment", regexp.MustCompile(`(?i)\b(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|webpassword|token)["']?[ \t]*[=:][ \t]*("[^"\r\n]+"|'[^'\r\n]+'|[^\s"'\\,;}]+)`), 1},
 	{"private_key", regexp.MustCompile(`(?s)-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----`), 0},
 }
-var sensitiveKey = regexp.MustCompile(`(?i)^(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|authorization|webpassword|pihole[_-]?password)$`)
+var sensitiveKey = regexp.MustCompile(`(?i)^(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|authorization|webpassword|pihole[_-]?password)$`)
 
 func IDs() []string {
 	out := []string{}
@@ -44,11 +44,21 @@ func Counts() map[string]int64 {
 	return out
 }
 func marker(id string) string { return "[REDACTED:" + id + "]" }
-func marked(s string) bool    { return strings.HasPrefix(s, "[REDACTED:") && strings.HasSuffix(s, "]") }
+func marked(s string) bool {
+	for _, r := range rules {
+		if s == marker(r.id) {
+			return true
+		}
+	}
+	return false
+}
 
 // Text never returns matches, hashes, locations or diagnostic context.
 func Text(s string, counts map[string]int64) string {
 	for _, r := range rules {
+		if !candidate(r.id, s) {
+			continue
+		}
 		indexes := r.re.FindAllStringSubmatchIndex(s, -1)
 		if len(indexes) == 0 {
 			continue
@@ -57,7 +67,7 @@ func Text(s string, counts map[string]int64) string {
 		last := 0
 		for _, m := range indexes {
 			a, b := m[2*r.group], m[2*r.group+1]
-			if strings.HasPrefix(s[a:b], "[REDACTED:") {
+			if marked(s[a:b]) {
 				continue
 			}
 			out.WriteString(s[last:a])
@@ -114,11 +124,17 @@ func JSON(data []byte, counts map[string]int64) []byte {
 	}
 	value = walk(value, "")
 	if !changed {
+		if Check(data) != nil {
+			return []byte(`"[REDACTED:password_assignment]"`)
+		}
 		return data
 	}
 	out, err := json.Marshal(value)
 	if err != nil {
 		return []byte(marker("invalid_json"))
+	}
+	if Check(out) != nil {
+		return []byte(`"[REDACTED:password_assignment]"`)
 	}
 	return out
 }
@@ -250,4 +266,30 @@ func Inspect(data []byte, counts map[string]int64) {
 	for k, v := range local {
 		original[k] += v
 	}
+}
+
+// Cheap literal prefilters avoid running six RE2 programs across ordinary large
+// transcripts. A prefilter can only skip when a required literal is absent.
+func candidate(id, s string) bool {
+	switch id {
+	case "github_token":
+		return strings.Contains(s, "gh") || strings.Contains(s, "github_pat_")
+	case "provider_key":
+		return strings.Contains(s, "sk-")
+	case "aws_access_key":
+		return strings.Contains(s, "AKIA") || strings.Contains(s, "ASIA")
+	case "private_key":
+		return strings.Contains(s, "-----BEGIN ")
+	case "bearer_token":
+		return strings.Contains(strings.ToLower(s), "bearer")
+	case "password_assignment":
+		lower := strings.ToLower(s)
+		for _, word := range []string{"password", "passwd", "pwd", "key", "token", "secret"} {
+			if strings.Contains(lower, word) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
 }
