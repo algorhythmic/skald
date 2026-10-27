@@ -89,60 +89,110 @@ func Text(s string, counts map[string]int64) string {
 func JSON(data []byte, counts map[string]int64) []byte {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
-	var value any
-	if d.Decode(&value) != nil {
-		return []byte(Text(string(data), counts))
-	}
 	changed := false
-	var walk func(any, string) any
-	walk = func(v any, key string) any {
-		switch x := v.(type) {
+	depth := 0
+	var visit func(string) ([]byte, error)
+	visit = func(key string) ([]byte, error) {
+		depth++
+		defer func() { depth-- }()
+		if depth > 128 {
+			return nil, ErrSensitive
+		}
+		token, e := d.Token()
+		if e != nil {
+			return nil, e
+		}
+		switch x := token.(type) {
+		case json.Delim:
+			var out bytes.Buffer
+			out.WriteByte(byte(x))
+			first := true
+			if x == '{' {
+				for d.More() {
+					k, e := d.Token()
+					if e != nil {
+						return nil, e
+					}
+					name, ok := k.(string)
+					if !ok {
+						return nil, ErrSensitive
+					}
+					safeName := Text(name, counts)
+					if safeName != name {
+						changed = true
+					}
+					context := name
+					if sensitiveKey.MatchString(key) {
+						context = key
+					}
+					v, e := visit(context)
+					if e != nil {
+						return nil, e
+					}
+					if !first {
+						out.WriteByte(',')
+					}
+					first = false
+					b, _ := json.Marshal(safeName)
+					out.Write(b)
+					out.WriteByte(':')
+					out.Write(v)
+				}
+				out.WriteByte('}')
+			} else if x == '[' {
+				for d.More() {
+					v, e := visit(key)
+					if e != nil {
+						return nil, e
+					}
+					if !first {
+						out.WriteByte(',')
+					}
+					first = false
+					out.Write(v)
+				}
+				out.WriteByte(']')
+			} else {
+				return nil, ErrSensitive
+			}
+			_, e = d.Token()
+			return out.Bytes(), e
 		case string:
-			y := x
+			safe := x
 			if sensitiveKey.MatchString(key) && x != "" && !marked(x) && !placeholder(x) {
-				y = marker("password_assignment")
+				safe = marker("password_assignment")
 				if counts != nil {
 					counts["password_assignment"]++
 				}
 			} else {
-				y = Text(x, counts)
+				safe = Text(x, counts)
 			}
-			if y != x {
+			if safe != x {
 				changed = true
 			}
-			return y
+			return json.Marshal(safe)
 		case json.Number:
 			if sensitiveKey.MatchString(key) {
 				changed = true
 				if counts != nil {
 					counts["password_assignment"]++
 				}
-				return marker("password_assignment")
+				return json.Marshal(marker("password_assignment"))
 			}
-		case map[string]any:
-			for k, v := range x {
-				x[k] = walk(v, k)
-			}
-		case []any:
-			for i, v := range x {
-				x[i] = walk(v, key)
-			}
+			return []byte(x), nil
+		default:
+			return json.Marshal(x)
 		}
-		return v
 	}
-	value = walk(value, "")
+	out, e := visit("")
+	if e != nil {
+		return []byte(Text(string(data), counts))
+	}
+	if _, e = d.Token(); e != io.EOF {
+		return []byte(Text(string(data), counts))
+	}
 	if !changed {
-		if Check(data) != nil {
-			return []byte(`"[REDACTED:password_assignment]"`)
-		}
 		return data
-	}
-	out, err := json.Marshal(value)
-	if err != nil {
-		return []byte(marker("invalid_json"))
-	}
-	if Check(out) != nil {
-		return []byte(`"[REDACTED:password_assignment]"`)
 	}
 	return out
 }
@@ -239,7 +289,11 @@ func Inspect(data []byte, counts map[string]int64) error {
 						return ErrSensitive
 					}
 					Text(s, counts)
-					if e = visit(s); e != nil {
+					context := s
+					if sensitiveKey.MatchString(key) {
+						context = key
+					}
+					if e = visit(context); e != nil {
 						return e
 					}
 				}

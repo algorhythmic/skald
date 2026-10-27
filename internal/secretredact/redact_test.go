@@ -144,3 +144,10 @@ func TestTypedRealAssignment(t *testing.T) {
 		t.Fatal("typed real assignment missed")
 	}
 }
+func TestDuplicateJSONReplacementPreservesObject(t *testing.T) {
+	input := []byte(`{"password":"` + strings.Repeat("Q", 18) + `","password":"","other":12345678901234567890}`)
+	out := JSON(input, nil)
+	if !json.Valid(out) || len(out) == 0 || out[0] != '{' || Check(out) != nil || !strings.Contains(string(out), "12345678901234567890") {
+		t.Fatal("duplicate JSON replacement lost object shape")
+	}
+}

@@ -33,9 +33,10 @@ require a separate invalidation plan.
 ## Remaining coverage / historical scrub
 
 Legacy title/project reprojections sanitize values before newly writing labels;
-existing derived rows are not rewritten. Byte-preserving SQLite backups and
-compressed backup exports remain separate coverage work. Until completed, this branch must not be
-presented as fully protecting every export/derived write or deployed as finished.
+existing derived rows are not rewritten. Backups and compressed exports rebuild a fresh logical database and sanitize
+rows before insertion. They omit unused source pages/WAL and remap content
+references. If logical content changes, a fresh archive generation invalidates
+old consumer cursors; original files remain unchanged.
 
 Prefer a sanitized replacement archive generation over mutating bytes under old
 content digests. Rebuild projections, indexes and feed references consistently;

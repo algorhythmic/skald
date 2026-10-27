@@ -32,5 +32,8 @@ Legacy archive exact reads can return a sanitized representation with a differen
 source_revision than the requested native revision. The extension marks this
 explicit derivative; verify its digest against returned sanitized raw bytes.
 Historical rows are not rewritten. JSON/HTTP/MCP/CLI outputs have a shared final
-projection filter, including base64 raw fields. Byte-preserving database backups
-are a separate outstanding coverage item; do not call them sanitized exports.
+projection filter, including base64 raw fields. Backups are fresh sanitized logical databases, not byte-preserving copies.
+Unused pages/WAL are omitted, content references remapped, and changed archives
+receive a fresh generation. Compressed manifests set redaction_version=1;
+OriginalSHA256 identifies the sanitized uncompressed payload. Older manifests
+remain readable, but only newly generated exports have this sanitation guarantee.

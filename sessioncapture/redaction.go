@@ -94,7 +94,9 @@ func Sanitize(c Captured) (result Captured, failure error) {
 	}
 	sort.Strings(ids)
 	raw := secretredact.JSON(c.Raw, nil)
-	raw = append(bytes.TrimRight(raw, "\r\n"), '\n')
+	if !bytes.Equal(raw, c.Raw) {
+		raw = append(bytes.TrimRight(raw, "\r\n"), '\n')
+	}
 	recWire := secretredact.JSON(wire, nil)
 	rec, err := sessionrecord.Decode(recWire)
 	if err != nil {
@@ -121,6 +123,9 @@ func Sanitize(c Captured) (result Captured, failure error) {
 }
 func SanitizeBatch(batch Batch) (Batch, error) {
 	out := batch
+	if batch.Records == nil {
+		return out, nil
+	}
 	out.Records = make([]Captured, len(batch.Records))
 	for i, c := range batch.Records {
 		next, err := Sanitize(c)
