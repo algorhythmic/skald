@@ -144,7 +144,9 @@ func JSON(data []byte, counts map[string]int64) []byte {
 // exists, rejection preserves exact source digests and leaves cursors unchanged.
 func Check(data []byte) error {
 	c := Counts()
-	Inspect(data, c)
+	if Inspect(data, c) != nil {
+		return ErrSensitive
+	}
 	for _, n := range c {
 		if n > 0 {
 			return ErrSensitive
@@ -201,11 +203,17 @@ func CheckWire(data []byte) error {
 // Inspect counts decoded JSON scalar occurrences without dropping duplicate
 // object keys or rounding numbers. Non-JSON native lines are scanned as text.
 // Counts refer to stored occurrences, not unique credentials or logical events.
-func Inspect(data []byte, counts map[string]int64) {
+func Inspect(data []byte, counts map[string]int64) error {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.UseNumber()
+	depth := 0
 	var visit func(string) error
 	visit = func(key string) error {
+		depth++
+		defer func() { depth-- }()
+		if depth > 128 {
+			return ErrSensitive
+		}
 		t, err := d.Token()
 		if err != nil {
 			return err
@@ -255,17 +263,21 @@ func Inspect(data []byte, counts map[string]int64) {
 	// Invalid JSON must not contribute partially parsed counts twice.
 	original := counts
 	counts = local
-	if visit("") != nil {
+	if err := visit(""); err != nil {
+		if err == ErrSensitive {
+			return err
+		}
 		Text(string(data), original)
-		return
+		return nil
 	}
 	if _, err := d.Token(); err != io.EOF {
 		Text(string(data), original)
-		return
+		return nil
 	}
 	for k, v := range local {
 		original[k] += v
 	}
+	return nil
 }
 
 // Cheap literal prefilters avoid running six RE2 programs across ordinary large

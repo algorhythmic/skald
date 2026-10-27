@@ -70,7 +70,10 @@ func scan(ctx context.Context, path string) (map[string]int64, error) {
 					return nil, errors.New("scan_failed")
 				}
 			}
-			secretredact.Inspect(b, counts)
+			if secretredact.Inspect(b, counts) != nil {
+				rows.Close()
+				return nil, errors.New("scan_failed")
+			}
 		}
 		e = rows.Err()
 		rows.Close()

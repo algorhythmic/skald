@@ -219,6 +219,9 @@ func respond(w http.ResponseWriter, value any, err error) {
 		if code == "cursor_expired" || code == "archive_feed_cursor_expired" || code == "capture_spool_pending" {
 			status = http.StatusConflict
 		}
+		if code == "secret_redaction_required" {
+			status = http.StatusUnprocessableEntity
+		}
 		if code == "evidence_redacted" {
 			status = http.StatusGone
 		}

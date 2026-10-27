@@ -106,3 +106,9 @@ func TestFineGrainedGitHubPrefilter(t *testing.T) {
 		t.Fatal("prefilter missed token")
 	}
 }
+func TestDepthBoundFailsClosed(t *testing.T) {
+	raw := []byte(strings.Repeat("[", 256) + `"ordinary"` + strings.Repeat("]", 256))
+	if Check(raw) == nil {
+		t.Fatal("deep input accepted")
+	}
+}

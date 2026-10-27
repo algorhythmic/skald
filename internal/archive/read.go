@@ -431,7 +431,7 @@ func ErrorCode(err error) string {
 	}
 	// Storage/IO errors must not leak database paths or transcript text over API.
 	switch err.Error() {
-	case "not_found", "invalid_request", "invalid_cursor", "cursor_expired", "invalid_page_limit", "response_too_large", "scope_denied", "exact_record_revision_and_adapter_required", "capture_capacity_limit",
+	case "secret_redaction_required", "not_found", "invalid_request", "invalid_cursor", "cursor_expired", "invalid_page_limit", "response_too_large", "scope_denied", "exact_record_revision_and_adapter_required", "capture_capacity_limit",
 		"invalid_archive_feed_cursor", "archive_feed_cursor_expired", "unsupported_archive_feed_version", "evidence_redacted", "capture_spool_pending",
 		"redaction_target_required", "invalid_redaction_scope", "redaction_scope_mismatch", "redaction_target_unavailable":
 		return err.Error()
