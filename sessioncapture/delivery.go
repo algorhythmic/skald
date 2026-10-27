@@ -57,7 +57,17 @@ type Sink interface {
 }
 
 func NewDelivery(source Source, previous Checkpoint, batch Batch) (Delivery, error) {
-	d := Delivery{Version: DeliveryVersion, Source: source, Previous: previous, Batch: batch}
+	sanitized, err := SanitizeBatch(batch)
+	if err != nil {
+		return Delivery{}, err
+	}
+	d := Delivery{Version: DeliveryVersion, Source: source, Previous: previous, Batch: sanitized}
+	for _, c := range sanitized.Records {
+		if c.Redaction != nil {
+			d.Version = SanitizedDeliveryVersion
+			break
+		}
+	}
 	if err := d.validateBatch(); err != nil {
 		return Delivery{}, err
 	}
@@ -120,7 +130,7 @@ func validateCheckpoint(source Source, cp Checkpoint, initial bool) error {
 }
 
 func (d Delivery) validateBatch() error {
-	if d.Version != DeliveryVersion {
+	if d.Version != DeliveryVersion && d.Version != SanitizedDeliveryVersion {
 		return ErrDeliveryVersion
 	}
 	if err := d.Source.Validate(); err != nil {
@@ -172,12 +182,13 @@ func (d Delivery) validateBatch() error {
 	boundaries[baseOrdinal] = baseOffset
 	var rawBytes int64
 	prefix := sha256.New()
+	sanitized := false
 	for i, item := range batch.Records {
 		if len(item.Raw) == 0 || bytes.IndexByte(item.Raw, '\n') != len(item.Raw)-1 || len(item.Raw) > 64<<20 {
 			return errors.New("invalid_captured_line")
 		}
 		rec := item.Record
-		if err := rec.VerifyRaw(item.Raw); err != nil {
+		if err := item.Verify(); err != nil {
 			return fmt.Errorf("delivery_record_%d: %w", i, err)
 		}
 		if rec.Provider != d.Source.Provider || rec.SourceNamespace != d.Source.Namespace || rec.ConversationKey == nil || *rec.ConversationKey != sessionrecord.Conversation(d.Source.Namespace, cp.ConversationID) || rec.SourceOrder == nil || rec.SourceOrder.StreamGeneration != cp.Generation {
@@ -186,10 +197,16 @@ func (d Delivery) validateBatch() error {
 		if rec.SourceOrder.Ordinal != baseOrdinal+int64(i) {
 			return errors.New("candidate_order_mismatch")
 		}
-		if baseOffset > math.MaxInt64-int64(len(item.Raw)) {
+		if item.Redaction != nil {
+			if d.Version != SanitizedDeliveryVersion {
+				return ErrDeliveryVersion
+			}
+			sanitized = true
+		}
+		if baseOffset > math.MaxInt64-item.NativeLength() {
 			return errors.New("candidate_boundary_overflow")
 		}
-		baseOffset += int64(len(item.Raw))
+		baseOffset += item.NativeLength()
 		rawBytes += int64(len(item.Raw))
 		_, _ = prefix.Write(item.Raw)
 		boundaries[baseOrdinal+int64(i)+1] = baseOffset
@@ -197,7 +214,10 @@ func (d Delivery) validateBatch() error {
 	if rawBytes > 128<<20 || cp.Offset != baseOffset || cp.Ordinal != baseOrdinal+int64(len(batch.Records)) {
 		return errors.New("candidate_boundary_mismatch")
 	}
-	if (prev.Offset == 0 || rewrite) && cp.PrefixDigest != "sha256:"+hex.EncodeToString(prefix.Sum(nil)) {
+	if d.Version == SanitizedDeliveryVersion && !sanitized {
+		return ErrDeliveryVersion
+	}
+	if !sanitized && (prev.Offset == 0 || rewrite) && cp.PrefixDigest != "sha256:"+hex.EncodeToString(prefix.Sum(nil)) {
 		return errors.New("candidate_prefix_mismatch")
 	}
 	if len(batch.Records) == 0 && !rewrite && prev.Version != 0 && cp.PrefixDigest != prev.PrefixDigest {

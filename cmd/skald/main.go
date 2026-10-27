@@ -246,7 +246,8 @@ func writeJSON(out io.Writer, value any) error {
 	if err != nil {
 		return err
 	}
-	if err := secretredact.CheckWire(b); err != nil {
+	b, err = secretredact.Wire(b)
+	if err != nil {
 		return err
 	}
 	var safe strings.Builder

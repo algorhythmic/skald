@@ -12,6 +12,7 @@ MANIFEST = ROOT / "docs" / "PRODUCER-CONTRACT-MANIFEST.json"
 FILES = (
     "schemas/session-record-v1.schema.json",
     "schemas/capture-delivery-v1.schema.json",
+    "schemas/capture-delivery-v2.schema.json",
     "schemas/archive-feed-v1.schema.json",
     "schemas/redaction-receipt-v1.schema.json",
     "testdata/identity-v1.json",
@@ -35,7 +36,7 @@ def current_manifest() -> dict:
         "status": "untagged_candidate",
         "contract_versions": {
             "session_record": 1,
-            "capture_delivery": 1,
+            "capture_delivery": 2,
             "archive_feed": 1,
             "redaction_receipt": 1,
         },

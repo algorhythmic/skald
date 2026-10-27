@@ -67,7 +67,7 @@ func Text(s string, counts map[string]int64) string {
 		last := 0
 		for _, m := range indexes {
 			a, b := m[2*r.group], m[2*r.group+1]
-			if marked(s[a:b]) {
+			if marked(s[a:b]) || (r.id == "password_assignment" && placeholder(s[a:b])) {
 				continue
 			}
 			out.WriteString(s[last:a])
@@ -99,7 +99,7 @@ func JSON(data []byte, counts map[string]int64) []byte {
 		switch x := v.(type) {
 		case string:
 			y := x
-			if sensitiveKey.MatchString(key) && x != "" && !marked(x) {
+			if sensitiveKey.MatchString(key) && x != "" && !marked(x) && !placeholder(x) {
 				y = marker("password_assignment")
 				if counts != nil {
 					counts["password_assignment"]++
@@ -111,6 +111,14 @@ func JSON(data []byte, counts map[string]int64) []byte {
 				changed = true
 			}
 			return y
+		case json.Number:
+			if sensitiveKey.MatchString(key) {
+				changed = true
+				if counts != nil {
+					counts["password_assignment"]++
+				}
+				return marker("password_assignment")
+			}
 		case map[string]any:
 			for k, v := range x {
 				x[k] = walk(v, k)
@@ -247,7 +255,7 @@ func Inspect(data []byte, counts map[string]int64) error {
 			_, err = d.Token()
 			return err
 		case string:
-			if sensitiveKey.MatchString(key) && x != "" && !marked(x) {
+			if sensitiveKey.MatchString(key) && x != "" && !marked(x) && !placeholder(x) {
 				counts["password_assignment"]++
 			} else {
 				Text(x, counts)
@@ -304,4 +312,90 @@ func candidate(id, s string) bool {
 		return false
 	}
 	return true
+}
+
+// Obvious documentation/code placeholders are not credential candidates. This
+// is deliberately lexical and never checks a value against a live service.
+func placeholder(s string) bool {
+	s = strings.TrimSpace(strings.Trim(s, "\"'"))
+	lower := strings.ToLower(s)
+	if s == "" || strings.HasPrefix(s, "$") || strings.HasPrefix(s, "<") {
+		return true
+	}
+	if strings.Trim(s, "*") == "" {
+		return true
+	}
+	switch lower {
+	case "changeme", "password", "str", "string", "int", "bool", "none", "null", "undefined", "secretstr":
+		return true
+	}
+	return strings.HasPrefix(lower, "optional[") || strings.HasPrefix(lower, "typing.")
+}
+
+// Wire sanitizes a JSON projection, including encoding/json's base64 raw byte
+// fields. Exact archive records are sanitized with sessioncapture.Sanitize first
+// so their raw digests agree; this is the final projection/transport safety net.
+func Wire(data []byte) (out []byte, err error) {
+	defer func() {
+		if recover() != nil {
+			out = nil
+			err = ErrSensitive
+		}
+	}()
+	if CheckWire(data) == nil {
+		return data, nil
+	}
+	counts := Counts()
+	if Inspect(data, counts) != nil {
+		return nil, ErrSensitive
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	var v any
+	if d.Decode(&v) != nil {
+		return nil, ErrSensitive
+	}
+	var walk func(any) error
+	walk = func(v any) error {
+		switch x := v.(type) {
+		case map[string]any:
+			for k, v := range x {
+				if k == "raw" {
+					if s, ok := v.(string); ok {
+						b, e := base64.StdEncoding.DecodeString(s)
+						if e != nil {
+							return ErrSensitive
+						}
+						c := Counts()
+						if Inspect(b, c) != nil {
+							return ErrSensitive
+						}
+						x[k] = base64.StdEncoding.EncodeToString(JSON(b, nil))
+					}
+				}
+				if e := walk(v); e != nil {
+					return e
+				}
+			}
+		case []any:
+			for _, v := range x {
+				if e := walk(v); e != nil {
+					return e
+				}
+			}
+		}
+		return nil
+	}
+	if walk(v) != nil {
+		return nil, ErrSensitive
+	}
+	wire, e := json.Marshal(v)
+	if e != nil {
+		return nil, ErrSensitive
+	}
+	out = JSON(wire, nil)
+	if CheckWire(out) != nil {
+		return nil, ErrSensitive
+	}
+	return out, nil
 }

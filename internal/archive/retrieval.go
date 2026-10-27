@@ -107,9 +107,11 @@ func (s *Store) RetrievalSnapshot(ctx context.Context, ns []string, generation i
 		} else {
 			envelope = []byte(raw)
 		}
-		if secretredact.Check(envelope) != nil {
+		counts := secretredact.Counts()
+		if secretredact.Inspect(envelope, counts) != nil {
 			return RetrievalSnapshot{}, secretredact.ErrSensitive
 		}
+		envelope = secretredact.JSON(envelope, nil)
 		rec, err := sessionrecord.Decode(envelope)
 		if err != nil {
 			return out, err

@@ -1,47 +1,46 @@
-# Secret redaction (work in progress)
+# Secret redaction
 
-The shared `internal/secretredact` policy uses linear-time Go regular expressions
-and `[REDACTED:<pattern-id>]` markers. No marker contains secret bytes or hashes.
-Detection is best effort: unknown formats, split/encoded values and image content
-can evade text patterns. Detected credential fields include passwords, API keys,
-access/refresh tokens and authorization values; token patterns cover GitHub,
-provider keys, AWS access IDs, bearer tokens and complete PEM private keys.
+`internal/secretredact` supplies shared linear-time RE2 rules and deterministic
+`[REDACTED:<rule-id>]` markers with no secret bytes or per-secret hashes. Patterns
+cover GitHub/provider keys, AWS access IDs, bearer tokens, password/key/token
+assignments, sensitive JSON keys and complete PEM private keys. Detection remains
+best effort: unknown formats, encoded/split values and image text need expanded
+policy. Markers describe detected patterns, not confirmed working credentials.
 
-Current capture safety gates reject detected sensitive records before durable
-archive or spool writes. HTTP, MCP and CLI replies containing detected secrets
-are withheld. This is intentionally a transitional **fail-closed** implementation:
-a sensitive source can block further capture, and an existing sensitive record
-can block a requested reply. It does not yet substitute sanitized capture bytes.
-Do not deploy it as the completed redaction feature. Byte-preserving backups are not yet protected by these gates. Exact archive
-reads and retrieval snapshot construction reject sensitive envelopes before
-clipping or materializing Braid caches. TUI text has a replacement filter. Existing
-Braid cache files still require explicit invalidation.
+Positive matches are **redact-and-store**, never a reason to drop a record or
+stall its checkpoint. Sanitized capture delivery v2 separates native byte lengths
+and collector-verified native prefix checkpoints from sanitized content digests.
+See [the v2 contract](CAPTURE-DELIVERY-V2.md). Clean v1 input remains supported.
+Detector exceptions, depth-limit failures or inconsistent sanitized metadata use
+a constant fail-closed error, without echoing source text. Existing capture size
+limits bound detector work; no unbounded timeout goroutine is spawned.
 
-Capture map: Claude (including subagents), Codex (including forks), and Devin
-snapshots converge through `sessioncapture.Read`/`ReadSnapshot` and normalization.
-`internal/daemon/collector.go` delivers through the capture spool or archive sink;
-`capturespool.enqueueBatch` durably buffers deliveries; `archive.validateIngest`
-checks direct and delivered ingestion before transactions. Native payloads and
-normalized envelopes are compressed in `archive/payload_compression.go`; titles,
-projects and activity are derived inside `archive/ingest.go`. Archive reads feed
-HTTP, MCP, CLI/TUI and Braid retrieval/context. Database backup/compressed backup
-is a separate byte-preserving export path, not a transcript JSON projection.
+Password precision excludes empty values, shell variable references, angle-bracket
+placeholders, all-asterisk masks, `changeme`, `password=password`, and common type
+annotations such as `str`, `string` and `Optional[str]`. This is lexical filtering;
+it does not authenticate values or prove they were never used as credentials.
 
-Sanitized capture requires a new explicit representation carrying original byte
-boundaries separately from sanitized raw bytes. Revisions must hash sanitized
-bytes; collector prefix verification must remain over the native source. Do not
-reuse a native revision for changed bytes or silently weaken delivery validation.
-Legacy consumers need explicit version rejection/negotiation. Historical scrub
-must be separately authorized; this change never edits historical rows.
+Claude (including subagents), Codex (including forks) and Devin snapshots converge
+through `sessioncapture.Read`/`ReadSnapshot`. Records are sanitized before delivery
+or spool persistence. Direct archive ingestion sanitizes too, then derives titles,
+projects and activity from sanitized envelopes. Native payload compression stores
+sanitized bytes. Legacy exact reads return explicit sanitized derivatives without
+rewriting historical rows. HTTP/MCP/CLI projections include a final shared filter
+for text and base64 raw fields; TUI text is filtered before wrapping. Retrieval
+snapshots sanitize before materializing new Braid caches. Existing cache files
+require a separate invalidation plan.
 
-## Historical scrub and downstream ingestion
+## Remaining coverage / historical scrub
+
+Byte-preserving SQLite backups, compressed backup exports and legacy startup SQL
+reprojections are separate coverage work. Until completed, this branch must not be
+presented as fully protecting every export/derived write or deployed as finished.
 
 Prefer a sanitized replacement archive generation over mutating bytes under old
 content digests. Rebuild projections, indexes and feed references consistently;
-retain native capture boundaries separately from sanitized payload lengths. Hold
-Muninn ingestion until that generation is verified; invalidate any previously
-consumed downstream data and Braid caches under an explicit recovery plan.
-Quarantining originals requires restricted encrypted storage and operator-owned
-retention. Plaintext in old backups, WAL and btrfs snapshots survives a logical
-row scrub; authorize retirement separately after a sanitized restore test. No
-historical scrub, backup retirement or deployment is performed by this change.
+retain native boundaries separately from sanitized lengths. Hold Muninn ingestion
+until that generation is verified and invalidate previously consumed downstream
+data under an explicit recovery plan. Quarantine originals in restricted encrypted
+storage with operator-owned retention. Plaintext in old backups, WAL and btrfs
+snapshots survives a logical scrub; authorize retirement separately after a
+sanitized restore test. This change never rewrites historical archive rows.

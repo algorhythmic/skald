@@ -1,0 +1,365 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.skald.invalid/capture-delivery-v2.schema.json",
+  "title": "Skald sanitized capture delivery v2",
+  "description": "Sanitized capture delivery. See docs/CAPTURE-DELIVERY-V2.md. Version 1 remains readable; acknowledgements remain version 1.",
+  "$ref": "#/$defs/delivery",
+  "$defs": {
+    "delivery": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 2
+        },
+        "batch_id": {
+          "type": "string",
+          "pattern": "^sr1:capture-batch:[0-9a-f]{64}$"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "previous": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/initialCheckpoint"
+            },
+            {
+              "$ref": "#/$defs/checkpoint"
+            }
+          ]
+        },
+        "batch": {
+          "$ref": "#/$defs/batch"
+        }
+      },
+      "required": [
+        "version",
+        "batch_id",
+        "source",
+        "previous",
+        "batch"
+      ],
+      "additionalProperties": false
+    },
+    "acknowledgement": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "destination": {
+          "type": "string",
+          "minLength": 1
+        },
+        "batch_id": {
+          "type": "string",
+          "pattern": "^sr1:capture-batch:[0-9a-f]{64}$"
+        },
+        "source_key": {
+          "type": "string",
+          "pattern": "^sr1:stream:[0-9a-f]{64}$"
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        }
+      },
+      "required": [
+        "version",
+        "destination",
+        "batch_id",
+        "source_key",
+        "checkpoint"
+      ],
+      "additionalProperties": false
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "namespace": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "enum": [
+            "claude_code",
+            "codex",
+            "devin"
+          ]
+        },
+        "stream_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "provider_version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "namespace",
+        "provider",
+        "stream_id"
+      ],
+      "additionalProperties": false
+    },
+    "checkpoint": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "source_key": {
+          "type": "string",
+          "pattern": "^sr1:stream:[0-9a-f]{64}$"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "parsed_offset": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "prefix_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "conversation_id": {
+          "type": "string"
+        },
+        "provider_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "has_gaps": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "version",
+        "source_key",
+        "generation",
+        "epoch",
+        "offset",
+        "parsed_offset",
+        "ordinal",
+        "prefix_digest",
+        "conversation_id",
+        "provider_version",
+        "has_gaps"
+      ],
+      "additionalProperties": false
+    },
+    "initialCheckpoint": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 0
+        },
+        "source_key": {
+          "const": ""
+        },
+        "generation": {
+          "const": ""
+        },
+        "epoch": {
+          "const": 0
+        },
+        "offset": {
+          "const": 0
+        },
+        "parsed_offset": {
+          "const": 0
+        },
+        "ordinal": {
+          "const": 0
+        },
+        "prefix_digest": {
+          "const": ""
+        },
+        "conversation_id": {
+          "const": ""
+        },
+        "provider_version": {
+          "const": ""
+        },
+        "has_gaps": {
+          "const": false
+        }
+      },
+      "required": [
+        "version",
+        "source_key",
+        "generation",
+        "epoch",
+        "offset",
+        "parsed_offset",
+        "ordinal",
+        "prefix_digest",
+        "conversation_id",
+        "provider_version",
+        "has_gaps"
+      ],
+      "additionalProperties": false
+    },
+    "batch": {
+      "type": "object",
+      "properties": {
+        "records": {
+          "type": "array",
+          "maxItems": 10000,
+          "items": {
+            "type": "object",
+            "properties": {
+              "record": {
+                "$ref": "session-record-v1.schema.json"
+              },
+              "raw": {
+                "type": "string",
+                "contentEncoding": "base64",
+                "minLength": 1
+              },
+              "redaction": {
+                "$ref": "#/$defs/redaction"
+              }
+            },
+            "required": [
+              "record",
+              "raw"
+            ],
+            "additionalProperties": false
+          },
+          "contains": {
+            "required": [
+              "redaction"
+            ]
+          }
+        },
+        "gaps": {
+          "type": "array",
+          "maxItems": 10002,
+          "items": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "minLength": 1
+              },
+              "offset": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "ordinal": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "generation": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "offset",
+              "ordinal",
+              "generation"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "checkpoint": {
+          "$ref": "#/$defs/checkpoint"
+        },
+        "pending_partial_line": {
+          "type": "boolean"
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "blocked": {
+          "type": "boolean"
+        },
+        "source_active": {
+          "type": "boolean"
+        },
+        "source_active_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "records",
+        "gaps",
+        "checkpoint",
+        "pending_partial_line",
+        "more",
+        "blocked"
+      ],
+      "additionalProperties": false
+    },
+    "redaction": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "const": 1
+        },
+        "applied": {
+          "const": true
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "native_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "rules": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "github_token",
+              "provider_key",
+              "aws_access_key",
+              "bearer_token",
+              "password_assignment",
+              "private_key"
+            ]
+          }
+        },
+        "counts": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "required": [
+        "version",
+        "applied",
+        "digest",
+        "native_bytes",
+        "rules",
+        "counts"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

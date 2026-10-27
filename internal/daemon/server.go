@@ -238,9 +238,15 @@ func respond(w http.ResponseWriter, value any, err error) {
 		_, _ = io.WriteString(w, `{"error":"response_too_large"}`)
 		return
 	}
-	if secretredact.CheckWire(body) != nil {
+	body, err = secretredact.Wire(body)
+	if err != nil {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = io.WriteString(w, `{"error":"secret_redaction_required"}`)
+		return
+	}
+	if len(body) > archive.MaxResponseBytes {
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_, _ = io.WriteString(w, `{"error":"response_too_large"}`)
 		return
 	}
 	_, _ = w.Write(body)

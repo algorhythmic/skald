@@ -112,3 +112,29 @@ func TestDepthBoundFailsClosed(t *testing.T) {
 		t.Fatal("deep input accepted")
 	}
 }
+func TestPasswordPlaceholders(t *testing.T) {
+	for _, v := range []string{"", "$VAR", "${VALUE}", "<value>", "***", "changeme", "password", "str", "string", "Optional[str]"} {
+		input := "password=" + v
+		c := Counts()
+		Text(input, c)
+		if c["password_assignment"] != 0 {
+			t.Fatal("placeholder candidate counted")
+		}
+		raw, _ := json.Marshal(map[string]string{"password": v})
+		c = Counts()
+		Inspect(raw, c)
+		if c["password_assignment"] != 0 {
+			t.Fatal("JSON placeholder counted")
+		}
+	}
+}
+func TestRealPasswordAssignments(t *testing.T) {
+	for _, v := range []string{strings.Repeat("Q", 16), "changeme123", "stringy", "12345"} {
+		input := "password=" + v
+		c := Counts()
+		out := Text(input, c)
+		if c["password_assignment"] != 1 || out == input {
+			t.Fatal("real assignment missed")
+		}
+	}
+}

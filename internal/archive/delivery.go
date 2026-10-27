@@ -56,6 +56,7 @@ func (s *Store) AcceptCaptureBatch(ctx context.Context, destination string, regi
 	if len(registrations) != len(deliveries) || len(deliveries) > 16 {
 		return nil, errors.New("invalid_capture_batch")
 	}
+	batches := make([]sessioncapture.Batch, len(deliveries))
 	needed := make([]uint64, len(deliveries))
 	wireBytes := 0 // Match the spool's sum of individual JSON envelope sizes.
 	for i, d := range deliveries {
@@ -76,7 +77,11 @@ func (s *Store) AcceptCaptureBatch(ctx context.Context, destination string, regi
 			return nil, errors.New("delivery_source_not_registered")
 		}
 		var err error
-		needed[i], err = validateIngest(registrations[i], d.Previous, d.Batch)
+		batches[i], err = sessioncapture.SanitizeBatch(d.Batch)
+		if err != nil {
+			return nil, err
+		}
+		needed[i], err = validateIngest(registrations[i], d.Previous, batches[i])
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +121,7 @@ func (s *Store) AcceptCaptureBatch(ctx context.Context, destination string, regi
 			return nil, err
 		}
 		acks[i] = sessioncapture.Acknowledgement{Version: sessioncapture.DeliveryVersion, Destination: destination, BatchID: d.BatchID, SourceKey: d.Source.Key(), Checkpoint: d.Batch.Checkpoint}
-		health, err := s.ingestTx(ctx, tx, r, d.Previous, d.Batch, now, &acks[i])
+		health, err := s.ingestTx(ctx, tx, r, d.Previous, batches[i], now, &acks[i])
 		if err != nil {
 			return nil, err
 		}

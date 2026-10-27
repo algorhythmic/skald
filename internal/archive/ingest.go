@@ -226,6 +226,10 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 // ingest requires the writer mutex. Health observations become visible only
 // after the transaction that durably accepted their evidence commits.
 func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time, receipt *sessioncapture.Acknowledgement) error {
+	batch, err := sessioncapture.SanitizeBatch(batch)
+	if err != nil {
+		return err
+	}
 	needed, err := validateIngest(r, previous, batch)
 	if err != nil {
 		return err
@@ -277,7 +281,7 @@ func validateIngest(r Registration, previous sessioncapture.Checkpoint, batch se
 		if err := secretredact.Check([]byte(encode(rec))); err != nil {
 			return 0, err
 		}
-		if err := rec.VerifyRaw(item.Raw); err != nil {
+		if err := item.Verify(); err != nil {
 			return 0, err
 		}
 		if rec.Provider != r.Provider || rec.SourceNamespace != r.Namespace || rec.ConversationKey == nil || *rec.ConversationKey != sessionrecord.Conversation(r.Namespace, cp.ConversationID) || rec.SourceOrder == nil || rec.SourceOrder.StreamGeneration != cp.Generation {
@@ -286,7 +290,7 @@ func validateIngest(r Registration, previous sessioncapture.Checkpoint, batch se
 		if rec.SourceOrder.Ordinal != baseOrdinal+int64(i) {
 			return 0, errors.New("candidate_order_mismatch")
 		}
-		baseOffset += int64(len(item.Raw))
+		baseOffset += item.NativeLength()
 		needed += uint64(len(item.Raw) + len(encode(rec))*2 + 4096)
 	}
 	if cp.Offset != baseOffset || cp.Ordinal != baseOrdinal+int64(len(batch.Records)) {

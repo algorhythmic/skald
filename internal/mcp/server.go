@@ -121,8 +121,13 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 			if marshalErr != nil || len(b) > maxOutput {
 				b, _ = json.Marshal(failure(reply.ID, -32603, "response_too_large"))
 			}
-			if secretredact.CheckWire(b) != nil {
+			var redactErr error
+			b, redactErr = secretredact.Wire(b)
+			if redactErr != nil {
 				b, _ = json.Marshal(failure(reply.ID, -32603, "secret_redaction_required"))
+			}
+			if len(b) > maxOutput {
+				b, _ = json.Marshal(failure(reply.ID, -32603, "response_too_large"))
 			}
 			if _, writeErr := w.Write(append(b, '\n')); writeErr != nil {
 				return writeErr

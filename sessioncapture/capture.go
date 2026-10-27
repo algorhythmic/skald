@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
 
@@ -65,7 +64,8 @@ type Gap struct {
 type Captured struct {
 	Record sessionrecord.Record `json:"record"`
 	// Raw includes the exact line terminator. JSON encoding carries bytes as base64.
-	Raw []byte `json:"raw"`
+	Raw       []byte     `json:"raw"`
+	Redaction *Redaction `json:"redaction,omitempty"`
 }
 type Batch struct {
 	Records    []Captured `json:"records"`
@@ -255,9 +255,6 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		if cp.Generation == "" {
 			cp.Generation = sessionrecord.Key("generation", cp.SourceKey, strconv.FormatInt(cp.Epoch, 10), sessionrecord.Digest(line))
 		}
-		if err := secretredact.Check(line); err != nil {
-			return Batch{}, err
-		}
 		r, code, err := normalize(line, source, &cp, now, childContext, codexContext)
 		if err != nil {
 			out.Gaps = append(out.Gaps, Gap{Code: err.Error(), Offset: cp.Offset, Ordinal: cp.Ordinal, Generation: cp.Generation})
@@ -271,7 +268,11 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		if err := r.VerifyRaw(line); err != nil {
 			return out, fmt.Errorf("adapter_contract: %w", err)
 		}
-		out.Records = append(out.Records, Captured{Record: r, Raw: line})
+		sanitized, err := Sanitize(Captured{Record: r, Raw: line})
+		if err != nil {
+			return Batch{}, err
+		}
+		out.Records = append(out.Records, sanitized)
 		_, _ = h.Write(line)
 		cp.Offset += int64(len(line))
 		cp.Ordinal++
