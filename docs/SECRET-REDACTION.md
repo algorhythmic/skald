@@ -3,7 +3,13 @@
 `internal/secretredact` supplies shared linear-time RE2 rules and deterministic
 `[REDACTED:<rule-id>]` markers with no secret bytes or per-secret hashes. Patterns
 cover GitHub/provider keys, AWS access IDs, bearer tokens, password/key/token
-assignments, sensitive JSON keys and complete PEM private keys. Detection remains
+assignments (including plain and JSON `api-key:` forms), sensitive JSON keys,
+complete PEM private keys, Tailscale keys (`tailscale_key`), Proxmox API tokens
+(`proxmox_api_token`), and WireGuard private/preshared keys (`wireguard_private_key`).
+Tailscale keys are replaced in full. Proxmox detection replaces only the UUID
+secret, retaining the user/realm and token ID prefix. WireGuard detection replaces
+only the 44-character base64 value after PrivateKey or PresharedKey assignments;
+PublicKey lines remain unchanged. Detection remains
 best effort: unknown formats, encoded/split values and image text need expanded
 policy. Markers describe detected patterns, not confirmed working credentials.
 

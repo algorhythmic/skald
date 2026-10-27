@@ -2,13 +2,14 @@ package secretredact
 
 import (
 	"encoding/json"
+	"github.com/algorhythmic/skald/internal/testsupport"
 	"strings"
 	"testing"
 )
 
 func TestPatterns(t *testing.T) {
-	cases := map[string]string{"github_token": "gh" + "p_" + strings.Repeat("A", 36), "provider_key": "s" + "k-" + strings.Repeat("b", 40), "aws_access_key": "AK" + "IA" + strings.Repeat("B", 16), "bearer_token": "Bearer " + strings.Repeat("c", 30), "password_assignment": "password=" + "synthetic-pass", "private_key": "-----BEGIN " + "PRIVATE KEY-----\nsynthetic\n-----END " + "PRIVATE KEY-----"}
-	for id, input := range cases {
+	for _, fixture := range testsupport.Secrets() {
+		id, input := fixture.Rule, fixture.Input
 		t.Run(id, func(t *testing.T) {
 			c := Counts()
 			out := Text(input, c)
@@ -149,5 +150,71 @@ func TestDuplicateJSONReplacementPreservesObject(t *testing.T) {
 	out := JSON(input, nil)
 	if !json.Valid(out) || len(out) == 0 || out[0] != '{' || Check(out) != nil || !strings.Contains(string(out), "12345678901234567890") {
 		t.Fatal("duplicate JSON replacement lost object shape")
+	}
+}
+
+func TestAdditionalRuleVariants(t *testing.T) {
+	for _, kind := range []string{"auth", "client", "api", "EXAMPLE"} {
+		input := "ts" + "key-" + kind + "-" + strings.Repeat("A", 32)
+		counts := Counts()
+		out := Text(input, counts)
+		if counts["tailscale_key"] != 1 || strings.Contains(out, strings.Repeat("A", 32)) {
+			t.Fatal("tailscale variant missed")
+		}
+	}
+	for _, label := range []string{"PrivateKey", "PresharedKey"} {
+		value := strings.Repeat("A", 43) + "="
+		input := "[Interface]\n" + label + " = " + value + "\n"
+		counts := Counts()
+		out := Text(input, counts)
+		if counts["wireguard_private_key"] != 1 || strings.Contains(out, value) || Text(out, nil) != out {
+			t.Fatal("wireguard variant missed")
+		}
+	}
+}
+
+func TestAdditionalRuleFalsePositives(t *testing.T) {
+	for _, input := range []string{"ordinary prose mentioning tskey", "PublicKey = " + strings.Repeat("A", 43) + "=", "PVEAuthCookie", "PVEAuthCookie="} {
+		counts := Counts()
+		if Text(input, counts) != input {
+			t.Fatal("ordinary text changed")
+		}
+		for _, n := range counts {
+			if n != 0 {
+				t.Fatal("ordinary text counted")
+			}
+		}
+	}
+}
+
+func TestAPIKeyHyphenForms(t *testing.T) {
+	value := strings.Repeat("Q", 18)
+	for _, input := range []string{"api-key: " + value, `"api-key": "` + value + `"`, `{"api-key":"` + value + `"}`} {
+		counts := Counts()
+		out := JSON([]byte(input), counts)
+		if counts["password_assignment"] != 1 || strings.Contains(string(out), value) {
+			t.Fatal("api-key form missed")
+		}
+	}
+}
+
+func TestAllRulesMixedMultiline(t *testing.T) {
+	var lines []string
+	for _, fixture := range testsupport.Secrets() {
+		lines = append(lines, fixture.Input)
+	}
+	input := strings.Join(lines, "\n")
+	counts := Counts()
+	out := Text(input, counts)
+	for _, fixture := range testsupport.Secrets() {
+		if counts[fixture.Rule] != 1 || strings.Contains(out, fixture.Value) {
+			t.Fatal("mixed multiline replacement missed")
+		}
+	}
+	if Text(out, nil) != out {
+		t.Fatal("mixed replacement not idempotent")
+	}
+	if len(IDs()) != len(testsupport.Secrets()) {
+		t.Fatal("shared per-rule matrix incomplete")
 	}
 }
