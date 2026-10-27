@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
@@ -82,6 +83,7 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 	}
 	seen := map[string]bool{}
 	for _, r := range registrations {
+		r.Source = sessioncapture.PublicSource(r.Source)
 		if err := r.Validate(); err != nil {
 			return err
 		}
@@ -204,7 +206,7 @@ func checkpoint(ctx context.Context, q rowQuerier, key string) (sessioncapture.C
 	var data string
 	err := q.QueryRowContext(ctx, "SELECT checkpoint_json FROM ingest_checkpoints WHERE stream_key=?", key).Scan(&data)
 	if err == sql.ErrNoRows {
-		return cp, nil
+		return sessioncapture.PublicCheckpoint(cp), nil
 	}
 	if err != nil {
 		return cp, err
@@ -212,7 +214,7 @@ func checkpoint(ctx context.Context, q rowQuerier, key string) (sessioncapture.C
 	if err := json.Unmarshal([]byte(data), &cp); err != nil {
 		return cp, errors.New("corrupt_checkpoint")
 	}
-	return cp, nil
+	return sessioncapture.PublicCheckpoint(cp), nil
 }
 
 func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time) (finalErr error) {
@@ -225,6 +227,11 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 // ingest requires the writer mutex. Health observations become visible only
 // after the transaction that durably accepted their evidence commits.
 func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time, receipt *sessioncapture.Acknowledgement) error {
+	previous = sessioncapture.PublicCheckpoint(previous)
+	batch, err := sessioncapture.SanitizeBatch(batch)
+	if err != nil {
+		return err
+	}
 	needed, err := validateIngest(r, previous, batch)
 	if err != nil {
 		return err
@@ -270,7 +277,13 @@ func validateIngest(r Registration, previous sessioncapture.Checkpoint, batch se
 	}
 	for i, item := range batch.Records {
 		rec := item.Record
-		if err := rec.VerifyRaw(item.Raw); err != nil {
+		if err := secretredact.Check(item.Raw); err != nil {
+			return 0, err
+		}
+		if err := secretredact.Check([]byte(encode(rec))); err != nil {
+			return 0, err
+		}
+		if err := item.Verify(); err != nil {
 			return 0, err
 		}
 		if rec.Provider != r.Provider || rec.SourceNamespace != r.Namespace || rec.ConversationKey == nil || *rec.ConversationKey != sessionrecord.Conversation(r.Namespace, cp.ConversationID) || rec.SourceOrder == nil || rec.SourceOrder.StreamGeneration != cp.Generation {
@@ -279,7 +292,7 @@ func validateIngest(r Registration, previous sessioncapture.Checkpoint, batch se
 		if rec.SourceOrder.Ordinal != baseOrdinal+int64(i) {
 			return 0, errors.New("candidate_order_mismatch")
 		}
-		baseOffset += int64(len(item.Raw))
+		baseOffset += item.NativeLength()
 		needed += uint64(len(item.Raw) + len(encode(rec))*2 + 4096)
 	}
 	if cp.Offset != baseOffset || cp.Ordinal != baseOrdinal+int64(len(batch.Records)) {
@@ -602,7 +615,7 @@ func continuationTitle(ctx context.Context, tx *sql.Tx, conv, namespace, parentI
 	if err != nil {
 		return err
 	}
-	label := []rune("Continuation of " + title)
+	label := []rune("Continuation of " + secretredact.Text(title, nil))
 	if len(label) > 240 {
 		label = label[:240]
 	}
@@ -629,7 +642,7 @@ func commonProjectDir(ctx context.Context, tx *sql.Tx, conv, dir string, rec ses
 	if root == "" || n >= 8 {
 		return nil
 	}
-	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, root, rec.RecordKey, rec.SourceRevision)
+	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, secretredact.Text(root, nil), rec.RecordKey, rec.SourceRevision)
 	return err
 }
 
@@ -655,7 +668,7 @@ func derivedTitle(rec sessionrecord.Record) (string, bool) {
 	if rec.Kind != "message" || rec.Role == nil || *rec.Role != "user" {
 		return "", false
 	}
-	text := strings.TrimSpace(rec.Body.Text)
+	text := strings.TrimSpace(secretredact.Text(rec.Body.Text, nil))
 	if strings.HasPrefix(text, "The following is the Codex agent history") {
 		// Approval-assessment rollouts wrap the assessed work in an APPROVAL
 		// REQUEST block whose "justification" describes it in natural language.
@@ -737,7 +750,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			AiTitle string `json:"aiTitle"`
 			Title   string `json:"title"`
 		}
-		if json.Unmarshal(raw, &line) != nil {
+		if json.Unmarshal(secretredact.JSON(raw, nil), &line) != nil {
 			continue
 		}
 		title := line.AiTitle
@@ -803,7 +816,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			p = &pick{streams: map[string]bool{}}
 			derived[conv] = p
 		}
-		rec, err := sessionrecord.Decode([]byte(envelope))
+		rec, err := sessionrecord.Decode(secretredact.JSON([]byte(envelope), nil))
 		if err != nil {
 			continue
 		}
@@ -857,7 +870,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 			rows.Close()
 			return err
 		}
-		label := []rune("Continuation of " + title)
+		label := []rune("Continuation of " + secretredact.Text(title, nil))
 		if len(label) > 240 {
 			label = label[:240]
 		}
@@ -927,7 +940,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 	rows.Close()
 	for conv, set := range projects {
 		for root, p := range set {
-			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, root, p.key, p.revision); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO session_projects VALUES (?,?,?,?)", conv, secretredact.Text(root, nil), p.key, p.revision); err != nil {
 				return err
 			}
 		}
@@ -983,7 +996,7 @@ func (s *Store) reprojectTitles(ctx context.Context) error {
 				sig = s
 			}
 		} else if kind == "tool_call" || kind == "message" || kind == "native_recap" {
-			if rec, err := sessionrecord.Decode([]byte(envelope)); err == nil {
+			if rec, err := sessionrecord.Decode(secretredact.JSON([]byte(envelope), nil)); err == nil {
 				sig = activitySignal(rec)
 			}
 		}

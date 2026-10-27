@@ -304,3 +304,32 @@ func TestBackupOperationsRejectSiblingLiveHardlink(t *testing.T) {
 		}
 	}
 }
+
+func TestCompressedBackupMissingZstdStableError(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	for _, decompress := range []bool{false, true} {
+		err := runZstd(context.Background(), decompress, bytes.NewReader(nil), &bytes.Buffer{})
+		if !errors.Is(err, ErrBackupZstdUnavailable) || err.Error() != "backup_zstd_unavailable" {
+			t.Fatal("missing compressor error is not stable")
+		}
+	}
+}
+
+func TestCompressedBackupRefusesPublicDestination(t *testing.T) {
+	s, _, _ := testStore(t)
+	backup, err := s.Backup(context.Background())
+	if err != nil {
+		t.Fatal("fixture backup")
+	}
+	dir := t.TempDir()
+	if os.Chmod(dir, 0755) != nil {
+		t.Fatal("fixture directory mode")
+	}
+	destination := filepath.Join(dir, "backup.zst")
+	if _, err := CompressBackup(context.Background(), backup, destination, DefaultMaxBackupBytes); err == nil || err.Error() != "private_owned_directory_required" {
+		t.Fatal("public backup destination not refused with stable error")
+	}
+	if _, err := os.Stat(destination); !os.IsNotExist(err) {
+		t.Fatal("refused export was published")
+	}
+}

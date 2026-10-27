@@ -18,6 +18,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
 	_ "modernc.org/sqlite"
@@ -390,14 +391,24 @@ func (s *Spool) enqueueBatch(ctx context.Context, deliveries []sessioncapture.De
 	if wireRegistry != string(configured) {
 		return ErrRegistry
 	}
+	deliveries = append([]sessioncapture.Delivery(nil), deliveries...)
 	wires := make([][]byte, len(deliveries))
 	total := 0
 	for i, d := range deliveries {
 		if err := d.Validate(); err != nil {
 			return err
 		}
+		normalized, err := sessioncapture.NewDelivery(d.Source, d.Previous, d.Batch)
+		if err != nil {
+			return err
+		}
+		d = normalized
+		deliveries[i] = normalized
 		wire, err := json.Marshal(d)
 		if err != nil {
+			return err
+		}
+		if err := secretredact.CheckWire(wire); err != nil {
 			return err
 		}
 		wires[i] = wire

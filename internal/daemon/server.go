@@ -20,6 +20,7 @@ import (
 	"github.com/algorhythmic/skald/internal/maintenance"
 	"github.com/algorhythmic/skald/internal/observability"
 	"github.com/algorhythmic/skald/internal/retrieval"
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessioncapture"
 )
 
@@ -166,7 +167,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		respond(w, map[string]any{
-			"contracts":      map[string]int{"sessionrecord": 1, "capture_delivery": sessioncapture.DeliveryVersion, "archive_feed": archivefeed.Version, "redaction_receipt": 1},
+			"contracts":      map[string]int{"sessionrecord": 1, "capture_delivery": sessioncapture.SanitizedDeliveryVersion, "archive_feed": archivefeed.Version, "redaction_receipt": 1},
 			"archive_schema": archive.SchemaVersion, "archive_instance": status["archive_instance"], "namespaces": ns,
 			"features":    []string{"exact_revision_reads", "archive_snapshot_and_tail", "durable_capture_spool", "independent_destination_receipts", "logical_content_removal", "scoped_read_only_mcp", "opt_in_claude_subagents", "archive_wide_descriptions", "opt_in_pinned_braid_retrieval", "compressed_payloads"},
 			"unsupported": []string{"remote_destination_transport", "odin_consumer", "physical_media_erasure"},
@@ -218,6 +219,9 @@ func respond(w http.ResponseWriter, value any, err error) {
 		if code == "cursor_expired" || code == "archive_feed_cursor_expired" || code == "capture_spool_pending" {
 			status = http.StatusConflict
 		}
+		if code == "secret_redaction_required" {
+			status = http.StatusUnprocessableEntity
+		}
 		if code == "evidence_redacted" {
 			status = http.StatusGone
 		}
@@ -230,6 +234,17 @@ func respond(w http.ResponseWriter, value any, err error) {
 	}
 	body, err := json.Marshal(value)
 	if err != nil || len(body) > archive.MaxResponseBytes {
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_, _ = io.WriteString(w, `{"error":"response_too_large"}`)
+		return
+	}
+	body, err = secretredact.Wire(body)
+	if err != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":"secret_redaction_required"}`)
+		return
+	}
+	if len(body) > archive.MaxResponseBytes {
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		_, _ = io.WriteString(w, `{"error":"response_too_large"}`)
 		return

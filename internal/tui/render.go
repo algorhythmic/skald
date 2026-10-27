@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"github.com/algorhythmic/skald/internal/archive"
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/uniseg"
 )
 
 func (m *model) add(text, color string, row, entry int, mark string) {
-	m.lines = append(m.lines, line{text, color, row, entry, mark, ""})
+	m.lines = append(m.lines, line{secretredact.Text(text, nil), color, row, entry, mark, ""})
 }
 func (m *model) paragraph(text, prefix, color string, row, entry, maxLines int) {
-	lines := wrap(text, max(1, min(m.width-8-uniseg.StringWidth(prefix), 108)))
+	lines := wrap(secretredact.Text(text, nil), max(1, min(m.width-8-uniseg.StringWidth(prefix), 108)))
 	if maxLines > 0 && len(lines) > maxLines {
 		lines = lines[:maxLines]
 		lines[len(lines)-1] = clip(lines[len(lines)-1], max(1, m.width-12)) + " …"

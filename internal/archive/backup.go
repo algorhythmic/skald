@@ -10,42 +10,11 @@ import (
 	"strings"
 
 	"github.com/algorhythmic/skald/sessionrecord"
-	"modernc.org/sqlite"
 )
 
-type backuper interface {
-	NewBackup(string) (*sqlite.Backup, error)
-}
-
+// copyDatabase produces a fresh sanitized logical archive, never a page copy.
 func copyDatabase(ctx context.Context, db *sql.DB, destination string) error {
-	conn, err := db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	return conn.Raw(func(driver any) (err error) {
-		b, err := driver.(backuper).NewBackup(DSN(destination, false))
-		if err != nil {
-			return err
-		}
-		defer func() {
-			if e := b.Finish(); err == nil {
-				err = e
-			}
-		}()
-		for {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			more, err := b.Step(128)
-			if err != nil {
-				return err
-			}
-			if !more {
-				return nil
-			}
-		}
-	})
+	return logicalBackup(ctx, db, destination)
 }
 
 // backupTo publishes only after SQLite's online backup API and integrity checks

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"io"
 	"os"
 	"path/filepath"
@@ -242,6 +243,10 @@ func run(args []string, out, stderr io.Writer) error {
 // bidi formatting from untrusted source content. Archive bytes remain unchanged.
 func writeJSON(out io.Writer, value any) error {
 	b, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	b, err = secretredact.Wire(b)
 	if err != nil {
 		return err
 	}

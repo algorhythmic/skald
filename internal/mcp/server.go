@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"io"
 	"net/url"
 	"sort"
@@ -118,6 +119,14 @@ func (s *Server) Serve(ctx context.Context, in io.Reader, out io.Writer) error {
 		if reply != nil {
 			b, marshalErr := json.Marshal(reply)
 			if marshalErr != nil || len(b) > maxOutput {
+				b, _ = json.Marshal(failure(reply.ID, -32603, "response_too_large"))
+			}
+			var redactErr error
+			b, redactErr = secretredact.Wire(b)
+			if redactErr != nil {
+				b, _ = json.Marshal(failure(reply.ID, -32603, "secret_redaction_required"))
+			}
+			if len(b) > maxOutput {
 				b, _ = json.Marshal(failure(reply.ID, -32603, "response_too_large"))
 			}
 			if _, writeErr := w.Write(append(b, '\n')); writeErr != nil {
