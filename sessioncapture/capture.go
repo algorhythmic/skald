@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
 
@@ -253,6 +254,9 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		}
 		if cp.Generation == "" {
 			cp.Generation = sessionrecord.Key("generation", cp.SourceKey, strconv.FormatInt(cp.Epoch, 10), sessionrecord.Digest(line))
+		}
+		if err := secretredact.Check(line); err != nil {
+			return Batch{}, err
 		}
 		r, code, err := normalize(line, source, &cp, now, childContext, codexContext)
 		if err != nil {

@@ -48,3 +48,27 @@ func BenchmarkLargeTranscript(b *testing.B) {
 		Text(s, nil)
 	}
 }
+func TestInspectDuplicateEscapedKeys(t *testing.T) {
+	c := Counts()
+	Inspect([]byte(`{"password":"synthetic","password":"","nested":{"pass\u0077ord":12345}}`), c)
+	if c["password_assignment"] != 2 {
+		t.Fatal("duplicate or escaped key missed")
+	}
+	if Check([]byte(`{"password":"synthetic","password":""}`)) == nil {
+		t.Fatal("unsafe duplicate allowed")
+	}
+}
+func TestQuotedPassword(t *testing.T) {
+	s := `password="synthetic phrase with spaces"`
+	out := Text(s, nil)
+	if strings.Contains(out, "phrase") || Text(out, nil) != out {
+		t.Fatal("partial quoted replacement")
+	}
+}
+func TestWireRaw(t *testing.T) {
+	raw := []byte(`{"password":"synthetic"}`)
+	wire, _ := json.Marshal(map[string]any{"raw": raw})
+	if CheckWire(wire) == nil {
+		t.Fatal("base64 raw bypass")
+	}
+}

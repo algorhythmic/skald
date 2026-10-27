@@ -20,6 +20,7 @@ import (
 	"github.com/algorhythmic/skald/internal/maintenance"
 	"github.com/algorhythmic/skald/internal/observability"
 	"github.com/algorhythmic/skald/internal/retrieval"
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessioncapture"
 )
 
@@ -232,6 +233,11 @@ func respond(w http.ResponseWriter, value any, err error) {
 	if err != nil || len(body) > archive.MaxResponseBytes {
 		w.WriteHeader(http.StatusRequestEntityTooLarge)
 		_, _ = io.WriteString(w, `{"error":"response_too_large"}`)
+		return
+	}
+	if secretredact.CheckWire(body) != nil {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = io.WriteString(w, `{"error":"secret_redaction_required"}`)
 		return
 	}
 	_, _ = w.Write(body)

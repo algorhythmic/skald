@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"regexp"
 	"strings"
 )
@@ -126,8 +127,12 @@ func JSON(data []byte, counts map[string]int64) []byte {
 // durable write of capture bytes. Until a versioned sanitized capture contract
 // exists, rejection preserves exact source digests and leaves cursors unchanged.
 func Check(data []byte) error {
-	if !bytes.Equal(JSON(data, nil), data) {
-		return ErrSensitive
+	c := Counts()
+	Inspect(data, c)
+	for _, n := range c {
+		if n > 0 {
+			return ErrSensitive
+		}
 	}
 	return nil
 }
@@ -175,4 +180,74 @@ func CheckWire(data []byte) error {
 		return ErrSensitive
 	}
 	return nil
+}
+
+// Inspect counts decoded JSON scalar occurrences without dropping duplicate
+// object keys or rounding numbers. Non-JSON native lines are scanned as text.
+// Counts refer to stored occurrences, not unique credentials or logical events.
+func Inspect(data []byte, counts map[string]int64) {
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.UseNumber()
+	var visit func(string) error
+	visit = func(key string) error {
+		t, err := d.Token()
+		if err != nil {
+			return err
+		}
+		switch x := t.(type) {
+		case json.Delim:
+			if x == '{' {
+				for d.More() {
+					k, e := d.Token()
+					if e != nil {
+						return e
+					}
+					s, ok := k.(string)
+					if !ok {
+						return ErrSensitive
+					}
+					Text(s, counts)
+					if e = visit(s); e != nil {
+						return e
+					}
+				}
+			} else if x == '[' {
+				for d.More() {
+					if e := visit(key); e != nil {
+						return e
+					}
+				}
+			} else {
+				return ErrSensitive
+			}
+			_, err = d.Token()
+			return err
+		case string:
+			if sensitiveKey.MatchString(key) && x != "" && !marked(x) {
+				counts["password_assignment"]++
+			} else {
+				Text(x, counts)
+			}
+		case json.Number:
+			if sensitiveKey.MatchString(key) {
+				counts["password_assignment"]++
+			}
+		}
+		return nil
+	}
+	local := Counts()
+	// Invalid JSON must not contribute partially parsed counts twice.
+	original := counts
+	counts = local
+	if visit("") != nil {
+		Text(string(data), original)
+		return
+	}
+	if _, err := d.Token(); err != io.EOF {
+		Text(string(data), original)
+		return
+	}
+	for k, v := range local {
+		original[k] += v
+	}
 }

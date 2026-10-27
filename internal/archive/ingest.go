@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
 )
@@ -270,6 +271,12 @@ func validateIngest(r Registration, previous sessioncapture.Checkpoint, batch se
 	}
 	for i, item := range batch.Records {
 		rec := item.Record
+		if err := secretredact.Check(item.Raw); err != nil {
+			return 0, err
+		}
+		if err := secretredact.Check([]byte(encode(rec))); err != nil {
+			return 0, err
+		}
 		if err := rec.VerifyRaw(item.Raw); err != nil {
 			return 0, err
 		}
