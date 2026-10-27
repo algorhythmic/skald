@@ -22,7 +22,7 @@ import (
 const prefixCheckpointLimit = 4096
 
 // This cache is disposable, not a capture checkpoint or acceptance receipt.
-// SHA state can include a partial source block, so it must remain private.
+// The state excludes pending source bytes; it still belongs in private storage.
 type filePrefixCheckpoint struct {
 	Version int                        `json:"version"`
 	Device  uint64                     `json:"device"`

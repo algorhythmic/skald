@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"strconv"
 	"time"
@@ -114,13 +115,14 @@ func ReadSnapshot(data []byte, source Source, previous Checkpoint, limits Limits
 
 // PrefixState is a private acceleration hint, not an accepted capture checkpoint.
 // It is bound to the exact public checkpoint and may be discarded at any time.
-// HashState can contain a small fragment of source bytes; keep it private.
+// Only full-block hash state is serialized; no pending source bytes are saved.
 type PrefixState struct {
 	Version      int    `json:"version"`
 	SourceKey    string `json:"source_key"`
 	Offset       int64  `json:"offset"`
 	PrefixDigest string `json:"prefix_digest"`
 	HashState    []byte `json:"hash_state"`
+	BlockOffset  int64  `json:"block_offset"`
 }
 
 // ReadWithPrefixState restores a previously verified SHA-256 prefix state and
@@ -183,10 +185,23 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 	if cp.ProviderVersion == "" {
 		cp.ProviderVersion = "unknown"
 	}
-	h := sha256.New()
-	restored := state != nil && state.Version == 1 && state.SourceKey == cp.SourceKey && state.Offset == cp.Offset && state.PrefixDigest == cp.PrefixDigest && len(state.HashState) <= 256
+	var h hash.Hash = sha256.New()
+	if state != nil || next != nil {
+		h = newPrefixHash()
+	}
+	restored := state != nil && state.Version == 1 && state.SourceKey == cp.SourceKey && state.Offset == cp.Offset && state.PrefixDigest == cp.PrefixDigest && len(state.HashState) <= 256 && state.BlockOffset == cp.Offset-cp.Offset%sha256.BlockSize
 	if restored {
-		restored = h.(encoding.BinaryUnmarshaler).UnmarshalBinary(state.HashState) == nil && "sha256:"+hex.EncodeToString(h.Sum(nil)) == cp.PrefixDigest
+		restored = h.(encoding.BinaryUnmarshaler).UnmarshalBinary(state.HashState) == nil
+		if restored {
+			_, err := input.Seek(state.BlockOffset, io.SeekStart)
+			if err != nil {
+				return out, err
+			}
+			if _, err = io.CopyN(h, input, cp.Offset-state.BlockOffset); err != nil {
+				restored = false
+			}
+			restored = restored && "sha256:"+hex.EncodeToString(h.Sum(nil)) == cp.PrefixDigest
+		}
 	}
 	var n int64
 	var err error
@@ -294,7 +309,7 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		if err != nil {
 			return Batch{}, err
 		}
-		*next = PrefixState{Version: 1, SourceKey: cp.SourceKey, Offset: cp.Offset, PrefixDigest: cp.PrefixDigest, HashState: binary}
+		*next = PrefixState{Version: 1, SourceKey: cp.SourceKey, Offset: cp.Offset, PrefixDigest: cp.PrefixDigest, HashState: binary, BlockOffset: cp.Offset - cp.Offset%sha256.BlockSize}
 	}
 	out.Checkpoint = cp
 	return out, nil

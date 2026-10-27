@@ -24,9 +24,10 @@ needed to eliminate that pass. The existing one-minute unchanged-file cache is
 unchanged. This is a reduction in prefix-read amplification, not a claim of zero
 idle CPU or constant-time continuation.
 
-SHA-256 serialized state can contain a partial block of source bytes. Cache
-directories/files are private (0700/0600); do not publish or include them in
-public receipts. Cache writes are atomic hints; loss does not lose captured
+Serialized hints contain only full-block hash state, excluding pending source
+bytes. At most 63 checkpoint-boundary bytes are reread to restore the partial
+block. Cache directories/files remain private (0700/0600); do not publish or
+include them in public receipts. Cache writes are atomic hints; loss does not lose captured
 records. Each hint is matched to the exact accepted checkpoint before reuse.
 
 `BenchmarkPrefixContinuation` compares the original and accelerated paths on

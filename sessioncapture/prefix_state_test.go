@@ -26,6 +26,10 @@ func TestPrefixStateExactRewriteDetection(t *testing.T) {
 	if err != nil || len(first.Records) != 100 {
 		t.Fatalf("initial: %v records=%d", err, len(first.Records))
 	}
+	// Persisted state must not retain a partial plaintext block.
+	if bytes.Contains(state.HashState, []byte(strings.Repeat("a", 8))) {
+		t.Fatal("source fragment persisted")
+	}
 	// Exercise persisted state, rather than relying on retained hash objects.
 	wire, err := json.Marshal(state)
 	if err != nil {
@@ -99,7 +103,7 @@ func TestPrefixStateRemovesOnePrefixPass(t *testing.T) {
 	if _, _, err = sessioncapture.ReadWithPrefixState(after, src, first.Checkpoint, state, sessioncapture.DefaultLimits(), clock); err != nil {
 		t.Fatal(err)
 	}
-	if before.bytes-after.bytes != first.Checkpoint.Offset {
+	if before.bytes-after.bytes != first.Checkpoint.Offset-first.Checkpoint.Offset%64 {
 		t.Fatalf("expected one prefix saved: before=%d after=%d offset=%d", before.bytes, after.bytes, first.Checkpoint.Offset)
 	}
 }
