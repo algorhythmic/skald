@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -17,6 +16,10 @@ import (
 )
 
 const DefaultMaxBackupBytes int64 = 16 << 30
+
+// Stable errors do not expose executable paths or subprocess diagnostics.
+var ErrBackupZstdUnavailable = errors.New("backup_zstd_unavailable")
+var ErrBackupZstdFailed = errors.New("backup_zstd_failed")
 
 // BackupManifest describes exact rollback bytes, including their original schema.
 // Compression never deletes or upgrades the source recovery file. The payload
@@ -137,19 +140,26 @@ func (w *boundedWriter) Write(p []byte) (int, error) {
 func compressedLimit(raw int64) int64 { return raw + raw/256 + (1 << 20) }
 
 func runZstd(ctx context.Context, decompress bool, src io.Reader, dst io.Writer) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	executable, err := exec.LookPath("zstd")
+	if err != nil {
+		return ErrBackupZstdUnavailable
+	}
 	args := []string{"--quiet", "--no-progress", "--single-thread", "-3", "--stdout"}
 	if decompress {
 		args = []string{"--quiet", "--no-progress", "--decompress", "--memory=64MB", "--stdout"}
 	}
 	// Input/output are already-open private files, never shell command text.
-	cmd := exec.CommandContext(ctx, "zstd", args...)
+	cmd := exec.CommandContext(ctx, executable, args...)
 	cmd.Stdin = contextReader{ctx, src}
 	cmd.Stdout = dst
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		return fmt.Errorf("backup_zstd_failed: %w", err)
+		return ErrBackupZstdFailed
 	}
 	return nil
 }

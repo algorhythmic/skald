@@ -117,7 +117,17 @@ func TestEveryPatternSanitizedBackupAndCompressedExport(t *testing.T) {
 			if e != nil {
 				t.Fatal("fixture read")
 			}
-			legacy := filepath.Join(t.TempDir(), "legacy.sqlite")
+			// Explicitly model a public test root; keep private exports in a
+			// dedicated 0700 child rather than relying on TempDir's mode.
+			parent := t.TempDir()
+			if os.Chmod(parent, 0755) != nil {
+				t.Fatal("fixture parent mode")
+			}
+			private := filepath.Join(parent, "private-export")
+			if os.Mkdir(private, 0700) != nil {
+				t.Fatal("private export directory")
+			}
+			legacy := filepath.Join(private, "legacy.sqlite")
 			if os.WriteFile(legacy, raw, 0600) != nil {
 				t.Fatal("fixture copy")
 			}

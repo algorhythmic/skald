@@ -57,3 +57,8 @@ The default maximum is2,000,000 content objects. Crossing it returns the stable
 `backup_object_limit` error without publishing a backup; capture history is not
 evicted and the source is unchanged. There is no unbounded in-memory fallback.
 Tests configure much smaller limits/batches to exercise all boundary cases quickly.
+
+Compressed backups require the `zstd` executable on PATH. A missing executable
+returns the stable `backup_zstd_unavailable` error; execution failures return
+`backup_zstd_failed`, without subprocess diagnostics or executable paths. Neither
+failure publishes a backup. Private output directories remain mandatory.
