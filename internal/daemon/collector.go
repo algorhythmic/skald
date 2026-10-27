@@ -17,6 +17,7 @@ import (
 )
 
 type Collector struct {
+	PrefixDirectory string
 	Metrics         *observability.Recorder
 	scanMu          sync.Mutex
 	sources         []archive.Registration
@@ -178,7 +179,7 @@ func (c *Collector) Scan(ctx context.Context) bool {
 		if !batch.Pending {
 			c.Metrics.Add("capture_attempts", 1)
 			captureStarted := time.Now()
-			batch, err = captureFileMeasured(ctx, source, cp, c.Metrics)
+			batch, err = captureFileWithPrefixState(ctx, source, cp, c.Metrics, c.PrefixDirectory)
 			c.Metrics.Duration("capture", time.Since(captureStarted))
 		}
 		if err != nil {

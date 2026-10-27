@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"crypto/sha256"
+	"encoding"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -100,7 +101,7 @@ func (s Source) validate() error {
 // records and gaps. Prefix verification is deliberately conservative in L0: it
 // re-hashes captured bytes with bounded memory before accepting continuation.
 func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits, now time.Time) (Batch, error) {
-	return read(input, source, previous, limits, now, false)
+	return read(input, source, previous, limits, now, false, nil, nil)
 }
 
 // ReadSnapshot reads an owned, immutable in-memory snapshot. The caller must not
@@ -108,10 +109,32 @@ func Read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 // full captured prefix; only the redundant concurrent-mutation readback is
 // omitted. Use Read for native files and other mutable readers.
 func ReadSnapshot(data []byte, source Source, previous Checkpoint, limits Limits, now time.Time) (Batch, error) {
-	return read(bytes.NewReader(data), source, previous, limits, now, true)
+	return read(bytes.NewReader(data), source, previous, limits, now, true, nil, nil)
 }
 
-func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits, now time.Time, immutable bool) (Batch, error) {
+// PrefixState is a private acceleration hint, not an accepted capture checkpoint.
+// It is bound to the exact public checkpoint and may be discarded at any time.
+// HashState can contain a small fragment of source bytes; keep it private.
+type PrefixState struct {
+	Version      int    `json:"version"`
+	SourceKey    string `json:"source_key"`
+	Offset       int64  `json:"offset"`
+	PrefixDigest string `json:"prefix_digest"`
+	HashState    []byte `json:"hash_state"`
+}
+
+// ReadWithPrefixState restores a previously verified SHA-256 prefix state and
+// parses only the tail. Mutable inputs still undergo one full final verification:
+// a bounded anchor cannot detect arbitrary historical rewrites during append.
+// Invalid hints fall back to Read, and rewrites trigger the ordinary gap/rescan.
+// This preserves Read's exact integrity contract while removing one prefix pass.
+func ReadWithPrefixState(input io.ReadSeeker, source Source, previous Checkpoint, state PrefixState, limits Limits, now time.Time) (Batch, PrefixState, error) {
+	var next PrefixState
+	batch, err := read(input, source, previous, limits, now, false, &state, &next)
+	return batch, next, err
+}
+
+func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits, now time.Time, immutable bool, state, next *PrefixState) (Batch, error) {
 	out := Batch{Records: []Captured{}, Gaps: []Gap{}}
 	if err := source.validate(); err != nil {
 		return out, err
@@ -160,13 +183,27 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 	if cp.ProviderVersion == "" {
 		cp.ProviderVersion = "unknown"
 	}
-	if _, err := input.Seek(0, io.SeekStart); err != nil {
-		return out, err
-	}
 	h := sha256.New()
-	n, err := io.CopyN(h, input, cp.Offset)
-	if err != nil && err != io.EOF {
-		return out, err
+	restored := state != nil && state.Version == 1 && state.SourceKey == cp.SourceKey && state.Offset == cp.Offset && state.PrefixDigest == cp.PrefixDigest && len(state.HashState) <= 256
+	if restored {
+		restored = h.(encoding.BinaryUnmarshaler).UnmarshalBinary(state.HashState) == nil && "sha256:"+hex.EncodeToString(h.Sum(nil)) == cp.PrefixDigest
+	}
+	var n int64
+	var err error
+	if restored {
+		n, err = input.Seek(cp.Offset, io.SeekStart)
+		if err != nil || n != cp.Offset {
+			return out, errors.New("invalid_source_seek")
+		}
+	} else {
+		h.Reset()
+		if _, err := input.Seek(0, io.SeekStart); err != nil {
+			return out, err
+		}
+		n, err = io.CopyN(h, input, cp.Offset)
+		if err != nil && err != io.EOF {
+			return out, err
+		}
 	}
 	if n != cp.Offset || "sha256:"+hex.EncodeToString(h.Sum(nil)) != cp.PrefixDigest {
 		out.Gaps = append(out.Gaps, Gap{Code: "continuity_gap", Offset: cp.Offset, Ordinal: cp.Ordinal, Generation: cp.Generation})
@@ -240,11 +277,24 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		}
 		verify := sha256.New()
 		if n, err := io.CopyN(verify, input, cp.Offset); err != nil || n != cp.Offset {
+			if restored {
+				return read(input, source, previous, limits, now, false, nil, next)
+			}
 			return Batch{}, errors.New("source_changed_during_read")
 		}
 		if "sha256:"+hex.EncodeToString(verify.Sum(nil)) != cp.PrefixDigest {
+			if restored {
+				return read(input, source, previous, limits, now, false, nil, next)
+			}
 			return Batch{}, errors.New("source_changed_during_read")
 		}
+	}
+	if next != nil {
+		binary, err := h.(encoding.BinaryMarshaler).MarshalBinary()
+		if err != nil {
+			return Batch{}, err
+		}
+		*next = PrefixState{Version: 1, SourceKey: cp.SourceKey, Offset: cp.Offset, PrefixDigest: cp.PrefixDigest, HashState: binary}
 	}
 	out.Checkpoint = cp
 	return out, nil

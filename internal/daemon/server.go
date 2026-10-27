@@ -291,7 +291,7 @@ func Serve(ctx context.Context, cfg Config, dataDir, socket string, ready func()
 		defer stop()
 		_ = metrics.Shutdown(shutdown)
 	}()
-	collector := &Collector{Store: s, Spool: spool, Config: cfg, Metrics: metrics}
+	collector := &Collector{Store: s, Spool: spool, Config: cfg, Metrics: metrics, PrefixDirectory: filepath.Join(dataDir, "prefix-checkpoints")}
 	var search *retrieval.Engine
 	if cfg.Retrieval.Executable != "" {
 		if cfg.Retrieval.Directory == "" {
