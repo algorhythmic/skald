@@ -72,3 +72,17 @@ func TestWireRaw(t *testing.T) {
 		t.Fatal("base64 raw bypass")
 	}
 }
+
+// This measures the added policy cost on one large native capture record, not
+// full daemon CPU or disk throughput. Fixture construction is outside the timer.
+func BenchmarkCheckLargeCapture(b *testing.B) {
+	raw, _ := json.Marshal(map[string]any{"type": "user", "sessionId": "synthetic", "message": map[string]string{"content": strings.Repeat("ordinary synthetic prose ", 44000)}})
+	b.SetBytes(int64(len(raw)))
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if Check(raw) != nil {
+			b.Fatal("clean synthetic fixture rejected")
+		}
+	}
+}
