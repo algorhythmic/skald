@@ -20,6 +20,9 @@ type rule struct {
 }
 
 var rules = []rule{
+	{"tailscale_key", regexp.MustCompile(`\btskey-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b`), 0},
+	{"proxmox_api_token", regexp.MustCompile(`(?i)\bPVEAPIToken=[^\s!="']+![^\s!="']+=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b`), 1},
+	{"wireguard_private_key", regexp.MustCompile(`(?i)\b(?:PrivateKey|PresharedKey)[ \t]*=[ \t]*([A-Za-z0-9+/]{43}=)`), 1},
 	{"github_token", regexp.MustCompile(`\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b`), 0},
 	{"provider_key", regexp.MustCompile(`\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b`), 0},
 	{"aws_access_key", regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), 0},
@@ -342,10 +345,17 @@ func Inspect(data []byte, counts map[string]int64) error {
 	return nil
 }
 
-// Cheap literal prefilters avoid running six RE2 programs across ordinary large
+// Cheap literal prefilters avoid running every RE2 program across ordinary large
 // transcripts. A prefilter can only skip when a required literal is absent.
 func candidate(id, s string) bool {
 	switch id {
+	case "tailscale_key":
+		return strings.Contains(s, "tskey-")
+	case "proxmox_api_token":
+		return strings.Contains(strings.ToLower(s), "pveapitoken=")
+	case "wireguard_private_key":
+		lower := strings.ToLower(s)
+		return strings.Contains(lower, "privatekey") || strings.Contains(lower, "presharedkey")
 	case "github_token":
 		return strings.Contains(s, "gh") || strings.Contains(s, "github_pat_")
 	case "provider_key":
