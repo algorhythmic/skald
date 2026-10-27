@@ -123,11 +123,19 @@ func Sanitize(c Captured) (result Captured, failure error) {
 }
 func SanitizeBatch(batch Batch) (Batch, error) {
 	out := batch
+	out.Checkpoint = PublicCheckpoint(batch.Checkpoint)
 	if batch.Records == nil {
 		return out, nil
 	}
 	out.Records = make([]Captured, len(batch.Records))
 	for i, c := range batch.Records {
+		if batch.Checkpoint.ConversationID != out.Checkpoint.ConversationID && c.Record.ConversationKey != nil {
+			conv := sessionrecord.Conversation(c.Record.SourceNamespace, out.Checkpoint.ConversationID)
+			c.Record.ConversationKey = &conv
+			if c.Record.OriginScope.Kind == "conversation" {
+				c.Record.OriginScope.Key = conv
+			}
+		}
 		next, err := Sanitize(c)
 		if err != nil {
 			return Batch{}, err

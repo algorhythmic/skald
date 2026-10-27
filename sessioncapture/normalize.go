@@ -111,7 +111,7 @@ func normalize(raw []byte, source Source, cp *Checkpoint, now time.Time, childCo
 	if cp.ConversationID == "" {
 		return sessionrecord.Record{}, "", errors.New("conversation_identity_unavailable")
 	}
-	conversation := sessionrecord.Conversation(source.Namespace, cp.ConversationID)
+	conversation := sessionrecord.Conversation(source.Namespace, PublicConversation(cp.SourceKey, cp.ConversationID))
 	scope := sessionrecord.Scope{Kind: "conversation", Key: conversation}
 	key := sessionrecord.OrdinalRecord(scope, cp.Generation, cp.Ordinal)
 	if nativeID != "" {

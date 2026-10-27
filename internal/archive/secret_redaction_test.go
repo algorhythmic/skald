@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/algorhythmic/skald/internal/secretredact"
 	"github.com/algorhythmic/skald/internal/testsupport"
 	"github.com/algorhythmic/skald/sessioncapture"
 	"strings"
@@ -128,5 +129,40 @@ func TestLegacyDerivedTitleSanitizedBeforeClipping(t *testing.T) {
 		if rows.Scan(&title) != nil || strings.Contains(title, value) {
 			t.Fatal("legacy title leaked")
 		}
+	}
+}
+func TestEveryPatternCheckpointPrivacyStoredAndAcknowledged(t *testing.T) {
+	for _, fixture := range testsupport.Secrets() {
+		t.Run(fixture.Rule, func(t *testing.T) {
+			s, r, _ := testStore(t)
+			r.ConversationID = fixture.Input
+			r.ProviderVersion = fixture.Input
+			raw, _ := json.Marshal(map[string]any{"type": "user", "sessionId": fixture.Input, "uuid": "metadata-record", "version": fixture.Input, "message": map[string]string{"role": "user", "content": "ordinary synthetic body"}})
+			raw = append(raw, '\n')
+			batch := testBatch(t, raw, r, sessioncapture.Checkpoint{})
+			d, e := sessioncapture.NewDelivery(r.Source, sessioncapture.Checkpoint{}, batch)
+			if e != nil {
+				t.Fatal("metadata delivery")
+			}
+			sink, e := s.CaptureSink("metadata-fixture", r)
+			if e != nil {
+				t.Fatal("metadata sink")
+			}
+			ack, e := sessioncapture.Deliver(context.Background(), sink, d)
+			if e != nil {
+				t.Fatal("metadata acceptance")
+			}
+			wire, _ := json.Marshal(ack)
+			if secretredact.CheckWire(wire) != nil {
+				t.Fatal("ack metadata leaked")
+			}
+			var stored string
+			if s.db.QueryRow(`SELECT checkpoint_json FROM ingest_checkpoints WHERE stream_key=?`, r.Key()).Scan(&stored) != nil || secretredact.Check([]byte(stored)) != nil {
+				t.Fatal("stored metadata leaked")
+			}
+			if _, e = sessioncapture.Deliver(context.Background(), sink, d); e != nil {
+				t.Fatal("private metadata replay")
+			}
+		})
 	}
 }

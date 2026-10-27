@@ -13,6 +13,7 @@ import (
 	"hash"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/algorhythmic/skald/sessionrecord"
@@ -174,7 +175,7 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		if cp.Version != 1 || cp.SourceKey != sourceKey(source) || cp.Offset < 0 || cp.Ordinal < 0 || cp.Epoch < 0 || cp.ParsedOffset < 0 || cp.ParsedOffset > cp.Offset || !sessionrecord.ValidDigest(cp.PrefixDigest) || (cp.Offset > 0 && cp.Generation == "") {
 			return out, errors.New("invalid_checkpoint")
 		}
-		if source.ConversationID != "" && cp.ConversationID != "" && cp.ConversationID != source.ConversationID {
+		if source.ConversationID != "" && cp.ConversationID != "" && PublicConversation(cp.SourceKey, cp.ConversationID) != PublicConversation(cp.SourceKey, source.ConversationID) {
 			return out, errors.New("checkpoint_conversation_mismatch")
 		}
 	} else {
@@ -182,6 +183,16 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 			return out, errors.New("invalid_checkpoint")
 		}
 		cp = Checkpoint{Version: 1, SourceKey: sourceKey(source), ConversationID: source.ConversationID, ProviderVersion: source.ProviderVersion, PrefixDigest: sessionrecord.Digest(nil)}
+	}
+	if strings.HasPrefix(cp.ConversationID, privateConversationPrefix) {
+		rawID, err := restoreNativeConversation(input, source, cp, codexContext, limits.RecordBytes)
+		if err != nil {
+			return out, err
+		}
+		cp.ConversationID = rawID
+		if strings.HasPrefix(source.ConversationID, privateConversationPrefix) {
+			source.ConversationID = rawID
+		}
 	}
 	if cp.ProviderVersion == "" {
 		cp.ProviderVersion = "unknown"
@@ -316,7 +327,7 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		}
 		*next = PrefixState{Version: 1, SourceKey: cp.SourceKey, Offset: cp.Offset, PrefixDigest: cp.PrefixDigest, HashState: binary, BlockOffset: cp.Offset - cp.Offset%sha256.BlockSize}
 	}
-	out.Checkpoint = cp
+	out.Checkpoint = PublicCheckpoint(cp)
 	return out, nil
 }
 

@@ -83,6 +83,7 @@ func (s *Store) register(ctx context.Context, registrations []Registration, repl
 	}
 	seen := map[string]bool{}
 	for _, r := range registrations {
+		r.Source = sessioncapture.PublicSource(r.Source)
 		if err := r.Validate(); err != nil {
 			return err
 		}
@@ -205,7 +206,7 @@ func checkpoint(ctx context.Context, q rowQuerier, key string) (sessioncapture.C
 	var data string
 	err := q.QueryRowContext(ctx, "SELECT checkpoint_json FROM ingest_checkpoints WHERE stream_key=?", key).Scan(&data)
 	if err == sql.ErrNoRows {
-		return cp, nil
+		return sessioncapture.PublicCheckpoint(cp), nil
 	}
 	if err != nil {
 		return cp, err
@@ -213,7 +214,7 @@ func checkpoint(ctx context.Context, q rowQuerier, key string) (sessioncapture.C
 	if err := json.Unmarshal([]byte(data), &cp); err != nil {
 		return cp, errors.New("corrupt_checkpoint")
 	}
-	return cp, nil
+	return sessioncapture.PublicCheckpoint(cp), nil
 }
 
 func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time) (finalErr error) {
@@ -226,6 +227,7 @@ func (s *Store) Ingest(ctx context.Context, r Registration, previous sessioncapt
 // ingest requires the writer mutex. Health observations become visible only
 // after the transaction that durably accepted their evidence commits.
 func (s *Store) ingest(ctx context.Context, r Registration, previous sessioncapture.Checkpoint, batch sessioncapture.Batch, now time.Time, receipt *sessioncapture.Acknowledgement) error {
+	previous = sessioncapture.PublicCheckpoint(previous)
 	batch, err := sessioncapture.SanitizeBatch(batch)
 	if err != nil {
 		return err

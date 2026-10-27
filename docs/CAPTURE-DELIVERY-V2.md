@@ -37,3 +37,21 @@ Unused pages/WAL are omitted, content references remapped, and changed archives
 receive a fresh generation. Compressed manifests set redaction_version=1;
 OriginalSHA256 identifies the sanitized uncompressed payload. Older manifests
 remain readable, but only newly generated exports have this sanitation guarantee.
+
+## Private checkpoint metadata
+
+Free-form provider-version strings are filtered before checkpoint persistence.
+A detected sensitive conversation ID becomes a stream-local
+`[REDACTED:checkpoint_identity]:<existing-stream-key>` marker. This surrogate
+contains neither the ID nor a fingerprint of it. Scope keys for new records use
+that public identity. Transport sources, previous checkpoints and acknowledgements
+use the same representation. Ordinary nonsensitive harness IDs are unchanged.
+
+Native identity comparisons stay in adapter memory. On resume, the reader uses
+explicit private source context, the bounded Codex root probe, or the first bounded
+Claude identity line to recover it, then verifies the exact native prefix before
+acceptance. An unrecoverable native identity is an adapter-context error with no
+source text in its diagnostic. Private IDs are stream-local; cross-stream aliasing
+of a sensitive ID is intentionally not inferred. Existing prefix/content digests
+remain integrity fields under the native-continuity contract, not per-secret
+fingerprints or redaction receipts.

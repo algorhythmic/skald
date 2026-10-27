@@ -61,6 +61,8 @@ func NewDelivery(source Source, previous Checkpoint, batch Batch) (Delivery, err
 	if err != nil {
 		return Delivery{}, err
 	}
+	source = PublicSource(source)
+	previous = PublicCheckpoint(previous)
 	d := Delivery{Version: DeliveryVersion, Source: source, Previous: previous, Batch: sanitized}
 	for _, c := range sanitized.Records {
 		if c.Redaction != nil {
@@ -263,7 +265,7 @@ func (d Delivery) validateBatch() error {
 }
 
 func (a Acknowledgement) Validate(destination string, d Delivery) error {
-	if destination == "" || a.Version != DeliveryVersion || a.Destination != destination || a.BatchID != d.BatchID || a.SourceKey != d.Source.Key() || a.Checkpoint != d.Batch.Checkpoint {
+	if destination == "" || a.Version != DeliveryVersion || a.Destination != destination || a.BatchID != d.BatchID || a.SourceKey != d.Source.Key() || PublicCheckpoint(a.Checkpoint) != PublicCheckpoint(d.Batch.Checkpoint) {
 		return ErrAcknowledgement
 	}
 	return nil

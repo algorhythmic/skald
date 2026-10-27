@@ -73,7 +73,7 @@ func (s *Store) AcceptCaptureBatch(ctx context.Context, destination string, regi
 				return nil, errors.New("capture_batch_too_large")
 			}
 		}
-		if d.Source != registrations[i].Source {
+		if sessioncapture.PublicSource(d.Source) != sessioncapture.PublicSource(registrations[i].Source) {
 			return nil, errors.New("delivery_source_not_registered")
 		}
 		var err error
@@ -81,7 +81,7 @@ func (s *Store) AcceptCaptureBatch(ctx context.Context, destination string, regi
 		if err != nil {
 			return nil, err
 		}
-		needed[i], err = validateIngest(registrations[i], d.Previous, batches[i])
+		needed[i], err = validateIngest(registrations[i], sessioncapture.PublicCheckpoint(d.Previous), batches[i])
 		if err != nil {
 			return nil, err
 		}
@@ -120,8 +120,8 @@ func (s *Store) AcceptCaptureBatch(ctx context.Context, destination string, regi
 		if err := s.checkIngestSpace(ctx, tx, totalNeeded); err != nil {
 			return nil, err
 		}
-		acks[i] = sessioncapture.Acknowledgement{Version: sessioncapture.DeliveryVersion, Destination: destination, BatchID: d.BatchID, SourceKey: d.Source.Key(), Checkpoint: d.Batch.Checkpoint}
-		health, err := s.ingestTx(ctx, tx, r, d.Previous, batches[i], now, &acks[i])
+		acks[i] = sessioncapture.Acknowledgement{Version: sessioncapture.DeliveryVersion, Destination: destination, BatchID: d.BatchID, SourceKey: d.Source.Key(), Checkpoint: batches[i].Checkpoint}
+		health, err := s.ingestTx(ctx, tx, r, sessioncapture.PublicCheckpoint(d.Previous), batches[i], now, &acks[i])
 		if err != nil {
 			return nil, err
 		}
