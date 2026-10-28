@@ -19,6 +19,9 @@ type rule struct {
 	group int
 }
 
+// Quoted assignment values also consume an adjacent unquoted suffix. Without
+// this, removing quotes can join a marker to that suffix, producing a new
+// assignment candidate on validation and stalling otherwise sanitized capture.
 var rules = []rule{
 	{"tailscale_key", regexp.MustCompile(`\btskey-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b`), 0},
 	{"proxmox_api_token", regexp.MustCompile(`(?i)\bPVEAPIToken=[^\s!="']+![^\s!="']+=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b`), 1},
@@ -27,7 +30,7 @@ var rules = []rule{
 	{"provider_key", regexp.MustCompile(`\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b`), 0},
 	{"aws_access_key", regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), 0},
 	{"bearer_token", regexp.MustCompile(`(?i)\bbearer[ \t]+([A-Za-z0-9._~+/=-]{8,})`), 1},
-	{"password_assignment", regexp.MustCompile(`(?i)\b(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|webpassword|token)(?:[ \t]*:[ \t]*(?:str|string|Optional\[str\])[ \t]*)?["']?[ \t]*[=:][ \t]*("[^"\r\n]+"|'[^'\r\n]+'|[^\s"'\\,;}]+)`), 1},
+	{"password_assignment", regexp.MustCompile(`(?i)\b(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|webpassword|token)(?:[ \t]*:[ \t]*(?:str|string|Optional\[str\])[ \t]*)?["']?[ \t]*[=:][ \t]*("[^"\r\n]+"[^\s"'\\,;}]*|'[^'\r\n]+'[^\s"'\\,;}]*|[^\s"'\\,;}]+)`), 1},
 	{"private_key", regexp.MustCompile(`(?s)-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----`), 0},
 }
 var sensitiveKey = regexp.MustCompile(`(?i)^(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|authorization|webpassword|pihole[_-]?password)$`)
