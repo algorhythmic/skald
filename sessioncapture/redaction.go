@@ -138,7 +138,9 @@ func SanitizeBatch(batch Batch) (Batch, error) {
 	if offset < 0 {
 		return Batch{}, errors.New("invalid_candidate_boundary")
 	}
-	out.Gaps = append([]Gap{}, batch.Gaps...)
+	if batch.Gaps != nil {
+		out.Gaps = append([]Gap{}, batch.Gaps...)
+	}
 	for i, c := range batch.Records {
 		if batch.Checkpoint.ConversationID != out.Checkpoint.ConversationID && c.Record.ConversationKey != nil {
 			conv := sessionrecord.Conversation(c.Record.SourceNamespace, out.Checkpoint.ConversationID)
@@ -155,6 +157,9 @@ func SanitizeBatch(batch Batch) (Batch, error) {
 		}
 		next, err := Sanitize(c)
 		if err != nil {
+			if batch.Gaps == nil {
+				return Batch{}, errors.New("invalid_delivery_arrays")
+			}
 			next = QuarantineRecord(c, offset)
 			out.Gaps = append(out.Gaps, Gap{Code: QuarantineReason, Offset: offset, Ordinal: c.Record.SourceOrder.Ordinal, Generation: c.Record.SourceOrder.StreamGeneration})
 			if !out.Checkpoint.HasGaps || offset < out.Checkpoint.ParsedOffset {

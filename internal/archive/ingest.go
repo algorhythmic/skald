@@ -276,6 +276,9 @@ func validateIngest(r Registration, previous sessioncapture.Checkpoint, batch se
 		return 0, errors.New("generation_conflict")
 	}
 	for i, item := range batch.Records {
+		if err := sessioncapture.ValidateQuarantineBoundary(item, baseOffset, batch.Gaps); err != nil {
+			return 0, err
+		}
 		rec := item.Record
 		if err := secretredact.Check(item.Raw); err != nil {
 			return 0, err

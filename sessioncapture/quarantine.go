@@ -65,3 +65,21 @@ func (c Captured) verifyQuarantine() error {
 	}
 	return nil
 }
+
+// ValidateQuarantineBoundary binds replay metadata to the accepted source range
+// and its transactional gap receipt, rather than trusting transport metadata.
+func ValidateQuarantineBoundary(c Captured, offset int64, gaps []Gap) error {
+	q, ok := c.QuarantineMetadata()
+	if !ok {
+		return nil
+	}
+	if c.Record.SourceOrder == nil || q.SourceOffset != offset {
+		return errors.New("invalid_quarantine_boundary")
+	}
+	for _, gap := range gaps {
+		if gap.Code == QuarantineReason && gap.Offset == offset && gap.Ordinal == q.Ordinal && gap.Generation == c.Record.SourceOrder.StreamGeneration {
+			return nil
+		}
+	}
+	return errors.New("quarantine_gap_required")
+}

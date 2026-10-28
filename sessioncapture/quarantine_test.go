@@ -27,7 +27,7 @@ func TestRedactionFailureQuarantinesAndContinues(t *testing.T) {
 		t.Fatal("reprocess metadata missing")
 	}
 	wire, _ := json.Marshal(c)
-	if bytes.Contains(wire, []byte(hidden)) || c.Record.Body.Text != "" || len(c.Record.Body.Parts) != 0 || bytes.Contains(c.Raw, []byte("nested")) || c.Verify() != nil {
+	if bytes.Contains(wire, []byte(hidden)) || bytes.Contains(wire, []byte(sessionrecord.Digest(bad))) || c.Record.Body.Text != "" || len(c.Record.Body.Parts) != 0 || bytes.Contains(c.Raw, []byte("nested")) || c.Verify() != nil {
 		t.Fatal("quarantine retained content")
 	}
 	if len(batch.Gaps) != 1 || batch.Gaps[0].Code != sessioncapture.QuarantineReason || !batch.Checkpoint.HasGaps || batch.Checkpoint.ParsedOffset != 0 {
@@ -78,5 +78,25 @@ func TestDirectBatchRedactionFailureQuarantined(t *testing.T) {
 	tampered.Record.Body.Text = "unexpected fixture content"
 	if tampered.Verify() == nil {
 		t.Fatal("quarantine accepted injected content")
+	}
+}
+
+func TestQuarantineRequiresMatchingReceiptAndBoundary(t *testing.T) {
+	s := source(sessioncapture.Claude)
+	s.ConversationID = "synthetic"
+	raw := []byte(`{"type":"user","sessionId":"synthetic","message":{"role":"user","content":"ordinary"}}` + "\n")
+	batch, err := sessioncapture.Read(bytes.NewReader(raw), s, sessioncapture.Checkpoint{}, sessioncapture.DefaultLimits(), clock)
+	if err != nil {
+		t.Fatal("fixture capture")
+	}
+	c := sessioncapture.QuarantineRecord(batch.Records[0], 0)
+	if sessioncapture.ValidateQuarantineBoundary(c, 1, nil) == nil {
+		t.Fatal("wrong boundary accepted")
+	}
+	if sessioncapture.ValidateQuarantineBoundary(c, 0, nil) == nil {
+		t.Fatal("missing receipt accepted")
+	}
+	if sessioncapture.ValidateQuarantineBoundary(c, 0, []sessioncapture.Gap{{Code: sessioncapture.QuarantineReason, Offset: 0, Ordinal: 0, Generation: c.Record.SourceOrder.StreamGeneration}}) != nil {
+		t.Fatal("matching receipt refused")
 	}
 }
