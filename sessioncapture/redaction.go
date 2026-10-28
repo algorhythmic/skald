@@ -103,7 +103,7 @@ func Sanitize(c Captured) (result Captured, failure error) {
 	recWire := secretredact.JSON(wire, nil)
 	rec, err := sessionrecord.Decode(recWire)
 	if err != nil {
-		return Captured{}, secretredact.ErrSensitive
+		return Captured{}, failureForRules(counts)
 	}
 	rec.SourceRevision = sessionrecord.Digest(raw)
 	if rec.RawRef != nil {
@@ -115,14 +115,14 @@ func Sanitize(c Captured) (result Captured, failure error) {
 	}
 	rec.Extensions[redactionExtension], _ = json.Marshal(meta)
 	result = Captured{Record: rec, Raw: raw, Redaction: meta}
-	if secretredact.Check(raw) != nil {
-		return Captured{}, secretredact.ErrSensitive
-	}
 	check, _ := json.Marshal(rec)
-	if secretredact.Check(check) != nil {
-		return Captured{}, secretredact.ErrSensitive
+	if err := residualFailure(raw, check); err != nil {
+		return Captured{}, err
 	}
-	return result, result.Verify()
+	if err := result.Verify(); err != nil {
+		return Captured{}, failureForRules(counts)
+	}
+	return result, nil
 }
 func SanitizeBatch(batch Batch) (Batch, error) {
 	out := batch
@@ -160,7 +160,7 @@ func SanitizeBatch(batch Batch) (Batch, error) {
 			if batch.Gaps == nil {
 				return Batch{}, errors.New("invalid_delivery_arrays")
 			}
-			next = QuarantineRecord(c, offset)
+			next = QuarantineRecord(c, offset, err)
 			out.Gaps = append(out.Gaps, Gap{Code: QuarantineReason, Offset: offset, Ordinal: c.Record.SourceOrder.Ordinal, Generation: c.Record.SourceOrder.StreamGeneration})
 			if !out.Checkpoint.HasGaps || offset < out.Checkpoint.ParsedOffset {
 				out.Checkpoint.ParsedOffset = offset

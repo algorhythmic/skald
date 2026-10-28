@@ -282,7 +282,7 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		candidate := Captured{Record: r, Raw: line}
 		sanitized, err := Sanitize(candidate)
 		if err != nil {
-			sanitized = QuarantineRecord(candidate, cp.Offset)
+			sanitized = QuarantineRecord(candidate, cp.Offset, err)
 			out.Gaps = append(out.Gaps, Gap{Code: QuarantineReason, Offset: cp.Offset, Ordinal: cp.Ordinal, Generation: cp.Generation})
 			cp.HasGaps = true
 		}

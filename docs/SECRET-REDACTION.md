@@ -86,7 +86,7 @@ failure publishes a backup. Private output directories remain mandatory.
 
 Capture and direct-ingest detector failures produce an `opaque_record` placeholder
 with an empty body and a metadata-only native capsule: ordinal, source byte offset,
-constant pattern ID `redaction_error` (the detector did not establish a rule), and
+pattern ID (described below), and
 reason `redaction_quarantined`. Original content, native record IDs, tool fields,
 and original individual-record digests are discarded. Required envelope routing
 and timing metadata and native byte length remain for delivery/checkpoint integrity.
@@ -112,3 +112,16 @@ and native length to reread only the source record under the current detector.
 No original content exists in Skald to recover. Do not reset the live checkpoint:
 that could duplicate following records. This change adds metadata, not an automatic
 historical rewrite or reprocessing command.
+
+### Quarantine rule attribution
+
+Residual post-redaction matches carry only allowlisted detector IDs/counts into
+the placeholder. If a transformed envelope fails validation, its applied rules
+are recorded as implicated. `pattern_id` is the lexically first rule; when more
+than one distinct rule is involved, `pattern_count` gives that distinct-rule
+count. `Redaction.Rules` contains the full sorted list and `Redaction.Counts`
+contains the corresponding positive occurrence counts across inspected surfaces.
+These are policy identifiers and counts, never error text or original content.
+`redaction_error` remains the sole fallback for exceptions or failed scans that
+cannot establish attribution; partial matches preceding a scan error do not
+prove which rule failed. Older generic placeholders remain valid. Schema stays8.
