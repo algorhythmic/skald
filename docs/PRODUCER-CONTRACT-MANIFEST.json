@@ -8,7 +8,7 @@
   "files": {
     "schemas/archive-feed-v1.schema.json": "sha256:4be7dac0c563dad8272c6bd17a9d2776f04f51a8271477867d6eddc364b58143",
     "schemas/capture-delivery-v1.schema.json": "sha256:cfdd3b8b77ec6a96d1895a400561af4b31b39a30103f65d3051c4bd507f52537",
-    "schemas/capture-delivery-v2.schema.json": "sha256:ba69596d73b367ed3403f667ad897ffd91eabe181becbe3b875facb62783a117",
+    "schemas/capture-delivery-v2.schema.json": "sha256:8b66803721290bc88a5c3a9c330e36432a3bab6abcab1a1ab42781c9ccd44e0e",
     "schemas/redaction-receipt-v1.schema.json": "sha256:5ab063e743c33243906c21fae2032fdadd890bb0972f266f809e0f3bd7de1265",
     "schemas/session-record-v1.schema.json": "sha256:e348e2705f7ac68f1845485d3fed219f9d61ff58f4e126f3d2080eda56685afd",
     "testdata/archive-feed/page-v1.json": "sha256:e2c8c3b44bff241b3f8c46977a30cebcd8c83ee74f2b5f234f9de8eabeab70dc",
