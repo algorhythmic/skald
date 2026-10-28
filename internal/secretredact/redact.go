@@ -172,7 +172,13 @@ func JSON(data []byte, counts map[string]int64) []byte {
 					counts["password_assignment"]++
 				}
 			} else {
-				safe = Text(x, counts)
+				// MCP and tool projections may carry a JSON document in a string.
+				// Decode it before looking for quoted assignment literals.
+				if json.Valid([]byte(x)) {
+					safe = string(JSON([]byte(x), counts))
+				} else {
+					safe = Text(x, counts)
+				}
 			}
 			if safe != x {
 				changed = true
@@ -312,7 +318,13 @@ func Inspect(data []byte, counts map[string]int64) error {
 			if sensitiveKey.MatchString(key) && x != "" && !marked(x) && !placeholder(x) {
 				counts["password_assignment"]++
 			} else {
-				Text(x, counts)
+				if json.Valid([]byte(x)) {
+					if err := Inspect([]byte(x), counts); err != nil {
+						return err
+					}
+				} else {
+					Text(x, counts)
+				}
 			}
 		}
 		return nil

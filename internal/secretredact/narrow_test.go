@@ -90,3 +90,13 @@ func TestJSONLiteralValueTypes(t *testing.T) {
 		t.Fatal("quoted JSON literal missed")
 	}
 }
+
+func TestQuotedLiteralInEmbeddedJSONProjection(t *testing.T) {
+	value := strings.Repeat("Q", 18)
+	inner, _ := json.Marshal(map[string]string{"text": "password=\"" + value + "\""})
+	wire, _ := json.Marshal(map[string]string{"text": string(inner)})
+	out, err := Wire(wire)
+	if err != nil || strings.Contains(string(out), value) || CheckWire(out) != nil {
+		t.Fatal("nested projection literal escaped redaction")
+	}
+}
