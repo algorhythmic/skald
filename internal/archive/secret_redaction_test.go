@@ -108,7 +108,7 @@ func TestLegacyDerivedTitleSanitizedBeforeClipping(t *testing.T) {
 	}
 	rec := target.Record
 	value := strings.Repeat("Q", 18)
-	rec.Body.Text = "password=" + value
+	rec.Body.Text = "password=\"" + value + "\""
 	_, e := s.db.Exec(`UPDATE normalization_storage SET envelope_json=?,compressed_envelope=NULL,decoded_length=-1 WHERE record_key=?`, encode(rec), rec.RecordKey)
 	if e != nil {
 		t.Fatal("fixture setup")
