@@ -177,7 +177,13 @@ func syncDirectory(path string) error {
 // independently decompresses and verifies exact bytes, SQLite integrity, and
 // content digests before publishing a private no-replace file and manifest.
 // It operates independently of Store and never holds the collector's scan lock.
-func CompressBackup(ctx context.Context, source, destination string, maxBytes int64) (_ BackupManifest, finalErr error) {
+func CompressBackup(ctx context.Context, source, destination string, maxBytes int64) (BackupManifest, error) {
+	return compressBackup(ctx, source, destination, maxBytes, false)
+}
+
+// Exact mode is private to retention of an already-created migration snapshot.
+// Public backup export continues to sanitize/rebuild before compression.
+func compressBackup(ctx context.Context, source, destination string, maxBytes int64, exact bool) (_ BackupManifest, finalErr error) {
 	var manifest BackupManifest
 	if maxBytes < 1 || maxBytes > DefaultMaxBackupBytes {
 		return manifest, errors.New("invalid_backup_size_limit")
@@ -234,20 +240,24 @@ func CompressBackup(ctx context.Context, source, destination string, maxBytes in
 		return manifest, err
 	}
 	defer os.RemoveAll(stage)
-	sanitizedPath := filepath.Join(stage, "sanitized.sqlite")
-	sourceDB, err := sql.Open("sqlite", DSN(source, true)+"&immutable=1")
-	if err != nil {
-		return manifest, err
+	streamPath := source
+	if !exact {
+		sanitizedPath := filepath.Join(stage, "sanitized.sqlite")
+		sourceDB, err := sql.Open("sqlite", DSN(source, true)+"&immutable=1")
+		if err != nil {
+			return manifest, err
+		}
+		err = logicalBackup(ctx, sourceDB, sanitizedPath)
+		sourceDB.Close()
+		if err != nil {
+			return manifest, err
+		}
+		if err = verifyFile(ctx, sanitizedPath, false); err != nil {
+			return manifest, err
+		}
+		streamPath = sanitizedPath
 	}
-	err = logicalBackup(ctx, sourceDB, sanitizedPath)
-	sourceDB.Close()
-	if err != nil {
-		return manifest, err
-	}
-	if err = verifyFile(ctx, sanitizedPath, false); err != nil {
-		return manifest, err
-	}
-	stream, err := openBackupFile(sanitizedPath)
+	stream, err := openBackupFile(streamPath)
 	if err != nil {
 		return manifest, err
 	}
@@ -274,6 +284,9 @@ func CompressBackup(ctx context.Context, source, destination string, maxBytes in
 	if err != nil {
 		return manifest, err
 	}
+	if err = out.Close(); err != nil {
+		return manifest, err
+	}
 	after, err := in.Stat()
 	if err != nil || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
 		return manifest, errors.New("backup_source_changed")
@@ -289,6 +302,9 @@ func CompressBackup(ctx context.Context, source, destination string, maxBytes in
 		return manifest, err
 	}
 	manifest = BackupManifest{Version: 1, RedactionVersion: 1, Format: "zstd", SourceName: filepath.Base(source), OriginalBytes: streamInfo.Size(), OriginalSHA256: hex.EncodeToString(rawHash.Sum(nil)), CompressedBytes: stat.Size(), CompressedSHA256: hex.EncodeToString(compressedHash.Sum(nil))}
+	if exact {
+		manifest.RedactionVersion = 0
+	}
 	rawPath := filepath.Join(stage, "verified.sqlite")
 	if err := decompressBackup(ctx, out.Name(), rawPath, manifest); err != nil {
 		return manifest, err
@@ -321,7 +337,9 @@ func CompressBackup(ctx context.Context, source, destination string, maxBytes in
 		return manifest, err
 	}
 	err = f.Sync()
-	f.Close()
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return manifest, err
 	}

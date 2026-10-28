@@ -138,6 +138,7 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return nil, err
 	}
+	initialVersion := version
 	if version > SchemaVersion {
 		return nil, errors.New("unsupported_archive_schema")
 	}
@@ -175,7 +176,7 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 			}
 		}
 		// Never mutate an older archive before a consistent recovery copy exists.
-		if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-2-"+NewID()+".sqlite")); err != nil {
+		if err := s.migrationBackupTo(context.Background(), filepath.Join(dir, "pre-schema-2-"+NewID()+".sqlite")); err != nil {
 			return nil, err
 		}
 	}
@@ -188,9 +189,9 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		version = 2
 	}
 	if version == 2 {
-		if existing == 2 {
+		if initialVersion > 0 {
 			// Never mutate an older archive before a consistent recovery copy exists.
-			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-3-"+NewID()+".sqlite")); err != nil {
+			if err := s.migrationBackupTo(context.Background(), filepath.Join(dir, "pre-schema-3-"+NewID()+".sqlite")); err != nil {
 				return nil, err
 			}
 		}
@@ -201,9 +202,9 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		version = 3
 	}
 	if version == 3 {
-		if existing == 3 {
+		if initialVersion > 0 {
 			// Never mutate an older archive before a consistent recovery copy exists.
-			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-4-"+NewID()+".sqlite")); err != nil {
+			if err := s.migrationBackupTo(context.Background(), filepath.Join(dir, "pre-schema-4-"+NewID()+".sqlite")); err != nil {
 				return nil, err
 			}
 		}
@@ -214,9 +215,9 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		version = 4
 	}
 	if version == 4 {
-		if existing == 4 {
+		if initialVersion > 0 {
 			// Never mutate an older archive before a consistent recovery copy exists.
-			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-5-"+NewID()+".sqlite")); err != nil {
+			if err := s.migrationBackupTo(context.Background(), filepath.Join(dir, "pre-schema-5-"+NewID()+".sqlite")); err != nil {
 				return nil, err
 			}
 		}
@@ -227,8 +228,8 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		version = 5
 	}
 	if version == 5 {
-		if existing == 5 {
-			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-6-"+NewID()+".sqlite")); err != nil {
+		if initialVersion > 0 {
+			if err := s.migrationBackupTo(context.Background(), filepath.Join(dir, "pre-schema-6-"+NewID()+".sqlite")); err != nil {
 				return nil, err
 			}
 		}
@@ -242,8 +243,8 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		if err := s.prepareReadIndexMigration(existing == 6); err != nil {
 			return nil, err
 		}
-		if existing == 6 {
-			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-7-"+NewID()+".sqlite")); err != nil {
+		if initialVersion > 0 {
+			if err := s.migrationBackupTo(context.Background(), filepath.Join(dir, "pre-schema-7-"+NewID()+".sqlite")); err != nil {
 				return nil, err
 			}
 		}
@@ -265,8 +266,8 @@ func Open(dir string, options Options) (_ *Store, finalErr error) {
 		if err := s.preparePayloadCompressionMigration(existing == 7); err != nil {
 			return nil, err
 		}
-		if existing == 7 {
-			if err := s.backupTo(context.Background(), filepath.Join(dir, "pre-schema-8-"+NewID()+".sqlite")); err != nil {
+		if initialVersion > 0 {
+			if err := s.migrationBackupTo(context.Background(), filepath.Join(dir, "pre-schema-8-"+NewID()+".sqlite")); err != nil {
 				return nil, err
 			}
 		}
