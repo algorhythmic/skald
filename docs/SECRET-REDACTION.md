@@ -17,8 +17,9 @@ Positive matches are **redact-and-store**, never a reason to drop a record or
 stall its checkpoint. Sanitized capture delivery v2 separates native byte lengths
 and collector-verified native prefix checkpoints from sanitized content digests.
 See [the v2 contract](CAPTURE-DELIVERY-V2.md). Clean v1 input remains supported.
-Detector exceptions, depth-limit failures or inconsistent sanitized metadata use
-a constant fail-closed error, without echoing source text. Existing capture size
+Detector exceptions and depth-limit failures quarantine the affected record and
+continue capture without echoing source text. Invalid integrity/transport metadata
+remains a rejected protocol error. Existing capture size
 limits bound detector work; no unbounded timeout goroutine is spawned.
 
 Assignment detection accepts explicit quoted string literals, including JSON
@@ -80,3 +81,47 @@ Compressed backups require the `zstd` executable on PATH. A missing executable
 returns the stable `backup_zstd_unavailable` error; execution failures return
 `backup_zstd_failed`, without subprocess diagnostics or executable paths. Neither
 failure publishes a backup. Private output directories remain mandatory.
+
+## Redaction quarantine fail-safe
+
+Capture and direct-ingest detector failures produce an `opaque_record` placeholder
+with an empty body and a metadata-only native capsule: ordinal, source byte offset,
+pattern ID (described below), and
+reason `redaction_quarantined`. Original content, native record IDs, tool fields,
+and original individual-record digests are discarded. Required envelope routing
+and timing metadata and native byte length remain for delivery/checkpoint integrity.
+The full native prefix proof remains on the stream checkpoint, as in capture v2.
+Positive matches still redact-and-store normally; invalid source/delivery integrity
+is not treated as a detector error or silently trusted.
+
+The committed captured boundary advances, and subsequent records are ingested.
+A consumed gap receipt freezes the parsed boundary to describe the missing content;
+this keeps source health `capture_gaps` until explicitly reconciled. Existing
+`capture_gaps` rows provide replay-safe quarantine accounting; schema stays8.
+No new table, migration, startup archive rewrite or unredacted quarantine store.
+
+HTTP/CLI status and MCP `status` expose `quarantine.total`, `quarantine.last_hour`,
+`quarantine.health`, and a reason. Any quarantine in the inclusive trailing hour
+sets health `degraded` with reason `redaction_quarantined`; otherwise it is healthy.
+Counts are namespace-scoped and persist across restart/backup. This is a status
+alert surface, not a push notification or external alert delivery service.
+
+Reprocessing is a separate, explicitly authorized operation: retain source files,
+resolve stream/generation using the receipt, and use the metadata offset/ordinal
+and native length to reread only the source record under the current detector.
+No original content exists in Skald to recover. Do not reset the live checkpoint:
+that could duplicate following records. This change adds metadata, not an automatic
+historical rewrite or reprocessing command.
+
+### Quarantine rule attribution
+
+Residual post-redaction matches carry only allowlisted detector IDs/counts into
+the placeholder. If a transformed envelope fails validation, its applied rules
+are recorded as implicated. `pattern_id` is the lexically first rule; when more
+than one distinct rule is involved, `pattern_count` gives that distinct-rule
+count. `Redaction.Rules` contains the full sorted list and `Redaction.Counts`
+contains the corresponding positive occurrence counts across inspected surfaces.
+These are policy identifiers and counts, never error text or original content.
+`redaction_error` remains the sole fallback for exceptions or failed scans that
+cannot establish attribution; partial matches preceding a scan error do not
+prove which rule failed. Older generic placeholders remain valid. Schema stays8.

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
@@ -407,6 +408,11 @@ func (s *Store) Status(ctx context.Context, namespaces []string) (map[string]any
  WHERE st.namespace IN (`+in+`) AND l.active=1`, args...).Scan(&total); err != nil {
 		return nil, err
 	}
+	quarantine, err := s.quarantineStatus(ctx, namespaces, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	status["quarantine"] = quarantine
 	status["sources"] = sources
 	status["sources_total"] = total
 	status["sources_omitted"] = total - int64(len(sources))

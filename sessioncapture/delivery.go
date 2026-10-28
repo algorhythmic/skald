@@ -190,6 +190,9 @@ func (d Delivery) validateBatch() error {
 			return errors.New("invalid_captured_line")
 		}
 		rec := item.Record
+		if err := ValidateQuarantineBoundary(item, baseOffset, batch.Gaps); err != nil {
+			return err
+		}
 		if err := item.Verify(); err != nil {
 			return fmt.Errorf("delivery_record_%d: %w", i, err)
 		}

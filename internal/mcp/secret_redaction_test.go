@@ -50,3 +50,19 @@ func TestEveryPatternMCPProjectionSanitized(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPQuarantineStatusProjection(t *testing.T) {
+	base, _ := testFetch(t)
+	fetch := func(ctx context.Context, path string, q url.Values) (any, error) {
+		value, err := base(ctx, path, q)
+		if err == nil && path == "/v1/status" {
+			value.(map[string]any)["quarantine"] = map[string]any{"total": 1, "last_hour": 1, "health": "degraded", "reason": "redaction_quarantined"}
+		}
+		return value, err
+	}
+	rows := transact(t, Config{Socket: "/tmp/test.sock", Namespaces: []string{"fixture:one"}}, fetch, initMessage, initializedMessage, call(2, "status", `{}`))
+	wire, _ := json.Marshal(rows)
+	if !strings.Contains(string(wire), "redaction_quarantined") || !strings.Contains(string(wire), "degraded") {
+		t.Fatal("MCP quarantine alert omitted")
+	}
+}
