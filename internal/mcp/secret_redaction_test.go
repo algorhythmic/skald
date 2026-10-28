@@ -15,7 +15,7 @@ func TestSensitiveMCPTranscriptSanitized(t *testing.T) {
 		value, err := base(ctx, path, q)
 		if err == nil && path == "/v1/transcript" {
 			for _, item := range value.(map[string]any)["items"].([]any) {
-				item.(map[string]any)["text"] = "password=" + strings.Repeat("S", 18)
+				item.(map[string]any)["text"] = "password=\"" + strings.Repeat("S", 18) + "\""
 			}
 		}
 		return value, err
@@ -48,5 +48,21 @@ func TestEveryPatternMCPProjectionSanitized(t *testing.T) {
 				t.Fatal("MCP secret projection not sanitized")
 			}
 		})
+	}
+}
+
+func TestMCPQuarantineStatusProjection(t *testing.T) {
+	base, _ := testFetch(t)
+	fetch := func(ctx context.Context, path string, q url.Values) (any, error) {
+		value, err := base(ctx, path, q)
+		if err == nil && path == "/v1/status" {
+			value.(map[string]any)["quarantine"] = map[string]any{"total": 1, "last_hour": 1, "health": "degraded", "reason": "redaction_quarantined"}
+		}
+		return value, err
+	}
+	rows := transact(t, Config{Socket: "/tmp/test.sock", Namespaces: []string{"fixture:one"}}, fetch, initMessage, initializedMessage, call(2, "status", `{}`))
+	wire, _ := json.Marshal(rows)
+	if !strings.Contains(string(wire), "redaction_quarantined") || !strings.Contains(string(wire), "degraded") {
+		t.Fatal("MCP quarantine alert omitted")
 	}
 }

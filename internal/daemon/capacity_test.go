@@ -114,8 +114,8 @@ func TestDiscoveryBeyondStatusBoundPersistsAcrossRestart(t *testing.T) {
 		t.Fatal("missing native files lost enrollment", len(restarted.Sources()))
 	}
 	status, err := reopened.Status(ctx, c.Config.Namespaces())
-	if err != nil || status["sources_total"] != int64(count) || status["sources_omitted"] != int64(count-256) || len(status["sources"].([]archive.SourceHealth)) != 256 {
-		t.Fatal("large enrollment widened or corrupted bounded diagnostics", status, err)
+	if err != nil || status["sources_total"] != int64(count) || status["sources_omitted"] != int64(0) || len(status["sources"].([]archive.SourceHealth)) != count {
+		t.Fatal("large enrollment omitted selected source diagnostics", status, err)
 	}
 	restarted.Config.Discovery[0].MaxSessions--
 	if err := restarted.Initialize(ctx); err == nil || err.Error() != "discovery_capacity_below_enrolled_count" {

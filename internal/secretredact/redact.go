@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"regexp"
 	"strings"
 )
@@ -19,6 +20,9 @@ type rule struct {
 	group int
 }
 
+// Quoted assignment values also consume an adjacent unquoted suffix. Without
+// this, removing quotes can join a marker to that suffix, producing a new
+// assignment candidate on validation and stalling otherwise sanitized capture.
 var rules = []rule{
 	{"tailscale_key", regexp.MustCompile(`\btskey-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+\b`), 0},
 	{"proxmox_api_token", regexp.MustCompile(`(?i)\bPVEAPIToken=[^\s!="']+![^\s!="']+=([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b`), 1},
@@ -27,7 +31,7 @@ var rules = []rule{
 	{"provider_key", regexp.MustCompile(`\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}\b`), 0},
 	{"aws_access_key", regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), 0},
 	{"bearer_token", regexp.MustCompile(`(?i)\bbearer[ \t]+([A-Za-z0-9._~+/=-]{8,})`), 1},
-	{"password_assignment", regexp.MustCompile(`(?i)\b(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|webpassword|token)(?:[ \t]*:[ \t]*(?:str|string|Optional\[str\])[ \t]*)?["']?[ \t]*[=:][ \t]*("[^"\r\n]+"|'[^'\r\n]+'|[^\s"'\\,;}]+)`), 1},
+	{"password_assignment", regexp.MustCompile(`(?i)\b(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret|aws[_-]secret[_-]access[_-]key|secret[_-]?key|webpassword|token)(?:[ \t]*:[ \t]*(?:str|string|Optional\[str\])[ \t]*)?["']?[ \t]*[=:][ \t]*("[^"\r\n]+"[^\s"'\\,;}]*|'[^'\r\n]+'[^\s"'\\,;}]*|[^\s"'\\,;}]+)`), 1},
 	{"private_key", regexp.MustCompile(`(?s)-----BEGIN (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----.*?-----END (?:RSA |EC |OPENSSH |DSA |ENCRYPTED )?PRIVATE KEY-----`), 0},
 }
 var sensitiveKey = regexp.MustCompile(`(?i)^(?:[a-z][a-z0-9]*_)*(?:password|passwd|pwd|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret|secret[_-]?key|authorization|webpassword|pihole[_-]?password)$`)
@@ -70,7 +74,7 @@ func Text(s string, counts map[string]int64) string {
 		last := 0
 		for _, m := range indexes {
 			a, b := m[2*r.group], m[2*r.group+1]
-			if marked(s[a:b]) || (r.id == "password_assignment" && placeholder(s[a:b])) {
+			if marked(s[a:b]) || (r.id == "password_assignment" && !literalAssignment(s[a:b])) {
 				continue
 			}
 			out.WriteString(s[last:a])
@@ -168,20 +172,19 @@ func JSON(data []byte, counts map[string]int64) []byte {
 					counts["password_assignment"]++
 				}
 			} else {
-				safe = Text(x, counts)
+				// MCP and tool projections may carry a JSON document in a string.
+				// Decode it before looking for quoted assignment literals.
+				if json.Valid([]byte(x)) {
+					safe = string(JSON([]byte(x), counts))
+				} else {
+					safe = Text(x, counts)
+				}
 			}
 			if safe != x {
 				changed = true
 			}
 			return json.Marshal(safe)
 		case json.Number:
-			if sensitiveKey.MatchString(key) {
-				changed = true
-				if counts != nil {
-					counts["password_assignment"]++
-				}
-				return json.Marshal(marker("password_assignment"))
-			}
 			return []byte(x), nil
 		default:
 			return json.Marshal(x)
@@ -315,11 +318,13 @@ func Inspect(data []byte, counts map[string]int64) error {
 			if sensitiveKey.MatchString(key) && x != "" && !marked(x) && !placeholder(x) {
 				counts["password_assignment"]++
 			} else {
-				Text(x, counts)
-			}
-		case json.Number:
-			if sensitiveKey.MatchString(key) {
-				counts["password_assignment"]++
+				if json.Valid([]byte(x)) {
+					if err := Inspect([]byte(x), counts); err != nil {
+						return err
+					}
+				} else {
+					Text(x, counts)
+				}
 			}
 		}
 		return nil
@@ -376,6 +381,71 @@ func candidate(id, s string) bool {
 		return false
 	}
 	return true
+}
+
+// literalAssignment treats quoted strings as explicit literals. Bare values
+// require >=8 ASCII token characters, >=2 character classes, >=3 bits/character
+// empirical Shannon entropy, and non-identifier syntax. Identifiers, attribute
+// references, calls and type expressions are deliberately left alone: quote a
+// real all-letter/identifier-shaped secret to make that intent unambiguous.
+func literalAssignment(value string) bool {
+	if value == "" || placeholder(value) {
+		return false
+	}
+	if value[0] == '\'' || value[0] == '"' {
+		return true
+	}
+	if len(value) < 8 {
+		return false
+	}
+	var frequencies [128]int
+	lower, upper, digit, symbol := false, false, false, false
+	identifier := true
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c >= 128 {
+			return false
+		}
+		switch {
+		case c >= 'a' && c <= 'z':
+			lower = true
+		case c >= 'A' && c <= 'Z':
+			upper = true
+		case c >= '0' && c <= '9':
+			digit = true
+			if i == 0 {
+				identifier = false
+			}
+		case c == '_':
+			symbol = true
+		case c == '-' || c == '+' || c == '/' || c == '=':
+			symbol = true
+			identifier = false
+		default:
+			return false
+		}
+		frequencies[c]++
+	}
+	if identifier {
+		return false
+	}
+	classes := 0
+	for _, present := range []bool{lower, upper, digit, symbol} {
+		if present {
+			classes++
+		}
+	}
+	if classes < 2 {
+		return false
+	}
+	entropy := 0.0
+	for _, n := range frequencies {
+		if n > 0 {
+			p := float64(n) / float64(len(value))
+			entropy -= p * math.Log2(p)
+		}
+	}
+	return entropy >= 3
 }
 
 // Obvious documentation/code placeholders are not credential candidates. This

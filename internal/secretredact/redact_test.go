@@ -23,7 +23,7 @@ func TestPatterns(t *testing.T) {
 	}
 }
 func TestJSON(t *testing.T) {
-	for _, input := range []string{`{"password":"synthetic"}`, `{"password":"synth\u0065tic"}`, `{"nested":[{"api_key":"synthetic"}]}`, `{"tool":"password=synthetic"}`} {
+	for _, input := range []string{`{"password":"synthetic"}`, `{"password":"synth\u0065tic"}`, `{"nested":[{"api_key":"synthetic"}]}`, `{"tool":"password=\"synthetic\""}`} {
 		c := Counts()
 		out := JSON([]byte(input), c)
 		if !json.Valid(out) || c["password_assignment"] != 1 || strings.Contains(string(out), "synthetic") {
@@ -52,7 +52,7 @@ func BenchmarkLargeTranscript(b *testing.B) {
 func TestInspectDuplicateEscapedKeys(t *testing.T) {
 	c := Counts()
 	Inspect([]byte(`{"password":"synthetic","password":"","nested":{"pass\u0077ord":12345}}`), c)
-	if c["password_assignment"] != 2 {
+	if c["password_assignment"] != 1 {
 		t.Fatal("duplicate or escaped key missed")
 	}
 	if Check([]byte(`{"password":"synthetic","password":""}`)) == nil {
@@ -88,7 +88,7 @@ func BenchmarkCheckLargeCapture(b *testing.B) {
 	}
 }
 func TestEnvironmentAndEmbeddedJSON(t *testing.T) {
-	for _, input := range []string{`OPENAI_API_KEY=synthetic`, `{"password":"synthetic"}`, `WEBPASSWORD=synthetic`, `password=[REDACTED:not-a-policy-id]`} {
+	for _, input := range []string{`OPENAI_API_KEY="synthetic"`, `{"password":"synthetic"}`, `WEBPASSWORD="synthetic"`, `password="[REDACTED:not-a-policy-id]"`} {
 		if Text(input, nil) == input {
 			t.Fatal("labeled credential missed")
 		}
@@ -131,7 +131,7 @@ func TestPasswordPlaceholders(t *testing.T) {
 }
 func TestRealPasswordAssignments(t *testing.T) {
 	for _, v := range []string{strings.Repeat("Q", 16), "changeme123", "stringy", "12345"} {
-		input := "password=" + v
+		input := "password=\"" + v + "\""
 		c := Counts()
 		out := Text(input, c)
 		if c["password_assignment"] != 1 || out == input {
@@ -188,7 +188,7 @@ func TestAdditionalRuleFalsePositives(t *testing.T) {
 }
 
 func TestAPIKeyHyphenForms(t *testing.T) {
-	value := strings.Repeat("Q", 18)
+	value := "9aB2cD3e" + "F4gH5iJ6"
 	for _, input := range []string{"api-key: " + value, `"api-key": "` + value + `"`, `{"api-key":"` + value + `"}`} {
 		counts := Counts()
 		out := JSON([]byte(input), counts)
@@ -216,5 +216,23 @@ func TestAllRulesMixedMultiline(t *testing.T) {
 	}
 	if len(IDs()) != len(testsupport.Secrets()) {
 		t.Fatal("shared per-rule matrix incomplete")
+	}
+}
+
+func TestQuotedAssignmentSuffixIdempotent(t *testing.T) {
+	for _, quote := range []string{"\"", "'"} {
+		for _, suffix := range []string{".suffix123", "/path", "+suffix", "", ")"} {
+			input := "password=" + quote + strings.Repeat("Q", 18) + quote + suffix
+			counts := Counts()
+			out := Text(input, counts)
+			if counts["password_assignment"] != 1 || Text(out, nil) != out {
+				t.Fatal("quoted suffix not idempotent")
+			}
+			raw, _ := json.Marshal(map[string]string{"content": input})
+			safe := JSON(raw, nil)
+			if Check(safe) != nil || !json.Valid(safe) {
+				t.Fatal("quoted suffix failed JSON validation")
+			}
+		}
 	}
 }

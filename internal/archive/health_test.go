@@ -112,7 +112,7 @@ func TestHealthSurvivesRestartAndRestore(t *testing.T) {
 	}
 }
 
-func TestStatusReportsScopedSourceOmissions(t *testing.T) {
+func TestStatusReportsAllSelectedSourcesWithinScope(t *testing.T) {
 	ctx := context.Background()
 	s, r, _ := testStore(t)
 	registrations := make([]Registration, 257)
@@ -131,7 +131,7 @@ func TestStatusReportsScopedSourceOmissions(t *testing.T) {
 		total, omitted int64
 		shown          int
 	}{
-		{[]string{r.Namespace}, 258, 2, 256},
+		{[]string{r.Namespace}, 258, 0, 258},
 		{[]string{foreign.Namespace}, 1, 0, 1},
 		{nil, 0, 0, 0},
 	} {

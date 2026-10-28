@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/algorhythmic/skald/sessioncapture"
 	"github.com/algorhythmic/skald/sessionrecord"
@@ -370,7 +371,7 @@ func (s *Store) health(ctx context.Context, ns []string) ([]SourceHealth, error)
   WHERE o.stream_key=cp.stream_key AND o.generation=cp.generation AND o.ordinal=cp.ordinal-1 ORDER BY n.rowid DESC LIMIT 1)
  FROM stream_locators l JOIN streams st USING(stream_key) JOIN sources src USING(namespace)
  LEFT JOIN ingest_checkpoints cp USING(stream_key)
- WHERE st.namespace IN (`+in+`) AND l.active=1 ORDER BY st.stream_key LIMIT 256`, args...)
+ WHERE st.namespace IN (`+in+`) AND l.active=1 ORDER BY st.stream_key LIMIT ?`, append(args, MaxEnrolledSources)...)
 	if err != nil {
 		return nil, err
 	}
@@ -407,6 +408,11 @@ func (s *Store) Status(ctx context.Context, namespaces []string) (map[string]any
  WHERE st.namespace IN (`+in+`) AND l.active=1`, args...).Scan(&total); err != nil {
 		return nil, err
 	}
+	quarantine, err := s.quarantineStatus(ctx, namespaces, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	status["quarantine"] = quarantine
 	status["sources"] = sources
 	status["sources_total"] = total
 	status["sources_omitted"] = total - int64(len(sources))
