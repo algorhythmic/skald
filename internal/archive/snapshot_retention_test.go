@@ -3,6 +3,7 @@ package archive
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"os"
@@ -81,7 +82,7 @@ func TestMigrationSnapshotRetentionRoundTrip(t *testing.T) {
 	t.Logf("logical_raw_bytes=%d logical_compressed_bytes=%d logical_ratio=%.2f", len(raw), manifest.CompressedBytes, float64(len(raw))/float64(manifest.CompressedBytes))
 }
 func TestMigrationSnapshotRetentionKeepsRawOnFailure(t *testing.T) {
-	for _, name := range []string{"verify_mismatch", "partial_write", "interrupted"} {
+	for _, name := range []string{"verify_mismatch", "partial_write", "interrupted", "manifest_publication"} {
 		t.Run(name, func(t *testing.T) {
 			source := syntheticSnapshot(t)
 			raw, err := os.ReadFile(source)
@@ -108,13 +109,22 @@ func TestMigrationSnapshotRetentionKeepsRawOnFailure(t *testing.T) {
 					return m, os.WriteFile(d+".manifest.json", wire, 0600)
 				}
 			}
+			verify := snapshotVerifier(verifySnapshotRoundTrip)
+			if name == "manifest_publication" {
+				verify = func(ctx context.Context, source, frame string) error {
+					if err := verifySnapshotRoundTrip(ctx, source, frame); err != nil {
+						return err
+					}
+					return os.Remove(frame + ".manifest.json")
+				}
+			}
 			ctx := context.Background()
 			if name == "interrupted" {
 				var cancel context.CancelFunc
 				ctx, cancel = context.WithCancel(ctx)
 				cancel()
 			}
-			if err = retainMigrationSnapshot(ctx, source, compress, verifySnapshotRoundTrip); err == nil {
+			if err = retainMigrationSnapshot(ctx, source, compress, verify); err == nil {
 				t.Fatal("failure not reported")
 			}
 			remaining, err := os.ReadFile(source)
@@ -145,5 +155,14 @@ func TestMigrationRetentionFailureStopsDDL(t *testing.T) {
 	files, _ := filepath.Glob(filepath.Join(dir, "pre-schema-7-*.sqlite"))
 	if len(files) != 1 {
 		t.Fatal("failed migration lost raw recovery")
+	}
+	db, err := sql.Open("sqlite", DSN(filepath.Join(dir, "archive.sqlite"), true))
+	if err != nil {
+		t.Fatal("fixture open")
+	}
+	defer db.Close()
+	var version int
+	if err = db.QueryRow("PRAGMA user_version").Scan(&version); err != nil || version != 6 {
+		t.Fatal("failed retention advanced schema")
 	}
 }

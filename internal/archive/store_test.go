@@ -310,6 +310,16 @@ func TestSchemaOneUpgradeHasRecoveryCopy(t *testing.T) {
 	if s.instance == "" {
 		t.Fatal("interrupted initial metadata was not recovered")
 	}
+	for next := 2; next <= SchemaVersion; next++ {
+		frames, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("pre-schema-%d-*.sqlite.zst", next)))
+		if err != nil || len(frames) != 1 {
+			t.Fatal("transition has no compressed recovery")
+		}
+		manifest, err := readBackupManifest(frames[0], DefaultMaxBackupBytes)
+		if err != nil || manifest.SchemaVersion != next-1 {
+			t.Fatal("transition snapshot has wrong schema")
+		}
+	}
 }
 
 func TestNativeTitleProjectionUsesSourceOrderAndLabelsAmbiguity(t *testing.T) {
