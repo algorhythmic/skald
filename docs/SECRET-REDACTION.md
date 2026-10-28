@@ -21,6 +21,18 @@ Detector exceptions, depth-limit failures or inconsistent sanitized metadata use
 a constant fail-closed error, without echoing source text. Existing capture size
 limits bound detector work; no unbounded timeout goroutine is spawned.
 
+Assignment detection accepts explicit quoted string literals, including JSON
+string values. Bare assignments require at least8 ASCII characters from letters,
+digits, `_`, `-`, `+`, `/`, `=`, at least2 character classes (lowercase, uppercase,
+digit, symbol), and empirical Shannon entropy at least3 bits/character. Bare
+identifier-shaped values are excluded regardless of apparent entropy; attributes,
+calls, environment lookups, booleans/numbers/null and type expressions are not
+credentials under this heuristic. Quote real identifier-shaped or low-entropy
+secrets to make literal intent explicit. JSON string values are already quoted
+literals; numeric/boolean/null JSON values are not redacted by this class.
+Plain `secret` and `aws_secret_access_key` assignments share this policy.
+Quoted assignments retain adjacent-suffix redaction so validation stays idempotent.
+
 Password precision excludes empty values, shell variable references, angle-bracket
 placeholders, all-asterisk masks, `changeme`, `password=password`, and common type
 annotations such as `str`, `string` and `Optional[str]`. This is lexical filtering;

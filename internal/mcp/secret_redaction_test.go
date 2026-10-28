@@ -15,7 +15,7 @@ func TestSensitiveMCPTranscriptSanitized(t *testing.T) {
 		value, err := base(ctx, path, q)
 		if err == nil && path == "/v1/transcript" {
 			for _, item := range value.(map[string]any)["items"].([]any) {
-				item.(map[string]any)["text"] = "password=" + strings.Repeat("S", 18)
+				item.(map[string]any)["text"] = "password=\"" + strings.Repeat("S", 18) + "\""
 			}
 		}
 		return value, err
