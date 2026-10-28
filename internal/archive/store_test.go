@@ -294,7 +294,7 @@ func TestSchemaOneUpgradeHasRecoveryCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-2-*.sqlite"))
+	backups, err := migrationSnapshots(t, dir, "pre-schema-2-*.sqlite")
 	if err != nil || len(backups) != 1 {
 		t.Fatal("migration has no recovery copy", err)
 	}
@@ -309,6 +309,16 @@ func TestSchemaOneUpgradeHasRecoveryCopy(t *testing.T) {
 	}
 	if s.instance == "" {
 		t.Fatal("interrupted initial metadata was not recovered")
+	}
+	for next := 2; next <= SchemaVersion; next++ {
+		frames, err := filepath.Glob(filepath.Join(dir, fmt.Sprintf("pre-schema-%d-*.sqlite.zst", next)))
+		if err != nil || len(frames) != 1 {
+			t.Fatal("transition has no compressed recovery")
+		}
+		manifest, err := readBackupManifest(frames[0], DefaultMaxBackupBytes)
+		if err != nil || manifest.SchemaVersion != next-1 {
+			t.Fatal("transition snapshot has wrong schema")
+		}
 	}
 }
 
@@ -643,7 +653,7 @@ func TestSchemaTwoUpgradeHasRecoveryCopy(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-3-*.sqlite"))
+	backups, err := migrationSnapshots(t, dir, "pre-schema-3-*.sqlite")
 	if err != nil || len(backups) != 1 {
 		t.Fatal("schema-3 migration has no recovery copy", err)
 	}
@@ -756,7 +766,7 @@ func TestSchemaFiveUpgradePreservesBackupAndCreatesReceipts(t *testing.T) {
 	if err := s.db.QueryRow("SELECT count(*) FROM capture_receipts").Scan(&count); err != nil || count != 0 {
 		t.Fatalf("receipt table %d %v", count, err)
 	}
-	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-6-*.sqlite"))
+	backups, err := migrationSnapshots(t, dir, "pre-schema-6-*.sqlite")
 	if err != nil || len(backups) != 1 {
 		t.Fatalf("backup %v %v", backups, err)
 	}

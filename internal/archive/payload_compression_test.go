@@ -80,7 +80,7 @@ func TestPayloadCompressionRoundTrip(t *testing.T) {
 		t.Fatal("reopen changed envelope", err)
 	}
 	var files []string
-	files, _ = filepath.Glob(filepath.Join(target, "pre-schema-8-*.sqlite"))
+	files, _ = migrationSnapshots(t, target, "pre-schema-8-*.sqlite")
 	if len(files) != 0 {
 		t.Fatal("current schema remigrated")
 	}
@@ -259,7 +259,7 @@ func TestSchemaSevenCompressionMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	copies, _ := filepath.Glob(filepath.Join(dir, "pre-schema-8-*.sqlite"))
+	copies, _ := migrationSnapshots(t, dir, "pre-schema-8-*.sqlite")
 	if len(copies) != 1 {
 		t.Fatal("missing rollback", copies)
 	}

@@ -125,7 +125,7 @@ func TestSchemaSixUpgradePreservesRecoveryCopyAndCounts(t *testing.T) {
 	if err != nil || stats["record_versions"] != int64(1) || stats["sessions"] != int64(0) {
 		t.Fatal("source-origin version count lost", stats, err)
 	}
-	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-7-*.sqlite"))
+	backups, err := migrationSnapshots(t, dir, "pre-schema-7-*.sqlite")
 	if err != nil || len(backups) != 1 {
 		t.Fatal("recovery backup missing", backups, err)
 	}
@@ -183,7 +183,7 @@ func TestSchemaSevenIndexBudgetFailurePreservesSchemaSixAndBackup(t *testing.T) 
 		}
 		t.Fatalf("index must respect the configured page budget: %v", err)
 	}
-	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-7-*.sqlite"))
+	backups, err := migrationSnapshots(t, dir, "pre-schema-7-*.sqlite")
 	if err != nil || len(backups) != 1 {
 		t.Fatal("recovery backup missing", backups, err)
 	}
@@ -219,7 +219,7 @@ func TestSchemaSevenMigrationChecksFreeSpaceBeforeBackup(t *testing.T) {
 		}
 		t.Fatalf("migration must reserve backup/build disk space: %v", err)
 	}
-	backups, err := filepath.Glob(filepath.Join(dir, "pre-schema-7-*.sqlite"))
+	backups, err := migrationSnapshots(t, dir, "pre-schema-7-*.sqlite")
 	if err != nil || len(backups) != 0 {
 		t.Fatal("space preflight ran after backup", backups, err)
 	}
