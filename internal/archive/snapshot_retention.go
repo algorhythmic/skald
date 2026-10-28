@@ -122,6 +122,10 @@ func retainMigrationSnapshot(ctx context.Context, source string, compress snapsh
 	if err = syncDirectory(parent); err != nil {
 		return err
 	}
+	// Finish fallible staging cleanup before retiring raw recovery as well.
+	if err = os.RemoveAll(stage); err != nil {
+		return err
+	}
 	after, err := os.Lstat(source)
 	if err != nil || !os.SameFile(before, after) || before.Size() != after.Size() || !before.ModTime().Equal(after.ModTime()) {
 		return errors.New("snapshot_source_changed")
