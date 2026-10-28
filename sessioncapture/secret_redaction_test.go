@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"github.com/algorhythmic/skald/sessioncapture"
+	"strings"
 	"testing"
 )
 
@@ -56,5 +57,35 @@ func TestSanitizedAppendAndMetadataTamper(t *testing.T) {
 	first.Records[0].Redaction.NativeBytes++
 	if _, e = sessioncapture.NewDelivery(s, sessioncapture.Checkpoint{}, first); e == nil {
 		t.Fatal("metadata tamper accepted")
+	}
+}
+
+func TestQuotedAssignmentSuffixCaptureResumes(t *testing.T) {
+	for _, quote := range []string{"\"", "'"} {
+		s := source(sessioncapture.Claude)
+		s.ConversationID = "synthetic"
+		prefix := []byte(`{"type":"user","sessionId":"synthetic","uuid":"prefix","message":{"role":"user","content":"ordinary"}}` + "\n")
+		first, err := sessioncapture.Read(bytes.NewReader(prefix), s, sessioncapture.Checkpoint{}, sessioncapture.DefaultLimits(), clock)
+		if err != nil {
+			t.Fatal("initial capture")
+		}
+		value := strings.Repeat("Q", 18)
+		raw, _ := json.Marshal(map[string]any{"type": "user", "sessionId": "synthetic", "uuid": "tail", "message": map[string]string{"role": "user", "content": "password=" + quote + value + quote + ".suffix123"}})
+		input := append(append([]byte{}, prefix...), append(raw, '\n')...)
+		next, err := sessioncapture.Read(bytes.NewReader(input), s, first.Checkpoint, sessioncapture.DefaultLimits(), clock)
+		if err != nil || len(next.Records) != 1 || next.Checkpoint.Offset != int64(len(input)) {
+			t.Fatal("quoted assignment tail blocked capture")
+		}
+		if bytes.Contains(next.Records[0].Raw, []byte(value)) || next.Records[0].Verify() != nil {
+			t.Fatal("sanitized tail invalid")
+		}
+		d, err := sessioncapture.NewDelivery(s, first.Checkpoint, next)
+		if err != nil || d.Validate() != nil {
+			t.Fatal("tail replay invalid")
+		}
+		final, err := sessioncapture.Read(bytes.NewReader(input), s, next.Checkpoint, sessioncapture.DefaultLimits(), clock)
+		if err != nil || len(final.Records) != 0 {
+			t.Fatal("tail replay duplicated")
+		}
 	}
 }

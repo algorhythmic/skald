@@ -218,3 +218,21 @@ func TestAllRulesMixedMultiline(t *testing.T) {
 		t.Fatal("shared per-rule matrix incomplete")
 	}
 }
+
+func TestQuotedAssignmentSuffixIdempotent(t *testing.T) {
+	for _, quote := range []string{"\"", "'"} {
+		for _, suffix := range []string{".suffix123", "/path", "+suffix", "", ")"} {
+			input := "password=" + quote + strings.Repeat("Q", 18) + quote + suffix
+			counts := Counts()
+			out := Text(input, counts)
+			if counts["password_assignment"] != 1 || Text(out, nil) != out {
+				t.Fatal("quoted suffix not idempotent")
+			}
+			raw, _ := json.Marshal(map[string]string{"content": input})
+			safe := JSON(raw, nil)
+			if Check(safe) != nil || !json.Valid(safe) {
+				t.Fatal("quoted suffix failed JSON validation")
+			}
+		}
+	}
+}
