@@ -279,9 +279,12 @@ func read(input io.ReadSeeker, source Source, previous Checkpoint, limits Limits
 		if err := r.VerifyRaw(line); err != nil {
 			return out, fmt.Errorf("adapter_contract: %w", err)
 		}
-		sanitized, err := Sanitize(Captured{Record: r, Raw: line})
+		candidate := Captured{Record: r, Raw: line}
+		sanitized, err := Sanitize(candidate)
 		if err != nil {
-			return Batch{}, err
+			sanitized = QuarantineRecord(candidate, cp.Offset)
+			out.Gaps = append(out.Gaps, Gap{Code: QuarantineReason, Offset: cp.Offset, Ordinal: cp.Ordinal, Generation: cp.Generation})
+			cp.HasGaps = true
 		}
 		out.Records = append(out.Records, sanitized)
 		_, _ = h.Write(line)

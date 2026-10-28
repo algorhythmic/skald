@@ -350,7 +350,7 @@ func (s *Server) call(ctx context.Context, name string, raw json.RawMessage) map
 	case "status":
 		// Status is an allowlist: the daemon status also carries source locations,
 		// discovery internals, and raw-access policy that agents do not need.
-		data = map[string]any{"archive_instance": status["archive_instance"], "boundary": status["boundary"], "sessions": status["sessions"], "record_versions": status["record_versions"], "retrieval": status["retrieval"], "backup": status["backup"], "sources_total": status["sources_total"], "sources_omitted": status["sources_omitted"], "source_health": safeHealth(status["sources"])}
+		data = map[string]any{"archive_instance": status["archive_instance"], "boundary": status["boundary"], "sessions": status["sessions"], "record_versions": status["record_versions"], "retrieval": status["retrieval"], "backup": status["backup"], "quarantine": status["quarantine"], "sources_total": status["sources_total"], "sources_omitted": status["sources_omitted"], "source_health": safeHealth(status["sources"])}
 	case "capabilities":
 		path = "/v1/capabilities"
 	case "sessions.list":

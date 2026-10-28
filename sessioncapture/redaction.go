@@ -44,13 +44,16 @@ func (c Captured) Verify() error {
 	}
 	known := secretredact.Counts()
 	for i, id := range m.Rules {
-		if _, ok := known[id]; !ok || m.Counts[id] < 1 || (i > 0 && m.Rules[i-1] >= id) {
+		if _, ok := known[id]; (!ok && id != QuarantinePattern) || m.Counts[id] < 1 || (i > 0 && m.Rules[i-1] >= id) {
 			return errors.New("invalid_sanitized_record")
 		}
 	}
 	stored, err := json.Marshal(m)
 	if err != nil || !bytes.Equal(stored, c.Record.Extensions[redactionExtension]) {
 		return errors.New("invalid_sanitized_record")
+	}
+	if _, exists := c.Record.Extensions["skald_quarantine"]; exists || m.Counts[QuarantinePattern] > 0 {
+		return c.verifyQuarantine()
 	}
 	return nil
 }
@@ -128,6 +131,14 @@ func SanitizeBatch(batch Batch) (Batch, error) {
 		return out, nil
 	}
 	out.Records = make([]Captured, len(batch.Records))
+	offset := batch.Checkpoint.Offset
+	for _, c := range batch.Records {
+		offset -= c.NativeLength()
+	}
+	if offset < 0 {
+		return Batch{}, errors.New("invalid_candidate_boundary")
+	}
+	out.Gaps = append([]Gap{}, batch.Gaps...)
 	for i, c := range batch.Records {
 		if batch.Checkpoint.ConversationID != out.Checkpoint.ConversationID && c.Record.ConversationKey != nil {
 			conv := sessionrecord.Conversation(c.Record.SourceNamespace, out.Checkpoint.ConversationID)
@@ -136,11 +147,23 @@ func SanitizeBatch(batch Batch) (Batch, error) {
 				c.Record.OriginScope.Key = conv
 			}
 		}
-		next, err := Sanitize(c)
-		if err != nil {
+		if err := c.Verify(); err != nil {
 			return Batch{}, err
 		}
+		if c.Record.SourceOrder == nil {
+			return Batch{}, errors.New("candidate_order_required")
+		}
+		next, err := Sanitize(c)
+		if err != nil {
+			next = QuarantineRecord(c, offset)
+			out.Gaps = append(out.Gaps, Gap{Code: QuarantineReason, Offset: offset, Ordinal: c.Record.SourceOrder.Ordinal, Generation: c.Record.SourceOrder.StreamGeneration})
+			if !out.Checkpoint.HasGaps || offset < out.Checkpoint.ParsedOffset {
+				out.Checkpoint.ParsedOffset = offset
+			}
+			out.Checkpoint.HasGaps = true
+		}
 		out.Records[i] = next
+		offset += c.NativeLength()
 	}
 	return out, nil
 }

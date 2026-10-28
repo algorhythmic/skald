@@ -338,7 +338,11 @@
               "aws_access_key",
               "bearer_token",
               "password_assignment",
-              "private_key"
+              "private_key",
+              "tailscale_key",
+              "proxmox_api_token",
+              "wireguard_private_key",
+              "redaction_error"
             ]
           }
         },
